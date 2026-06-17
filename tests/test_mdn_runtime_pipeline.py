@@ -7,6 +7,7 @@ import pytest
 
 from certification.certificate_schema import Certificate
 from generator.mdn import MotiveDecompositionNetwork
+from library.skill_library import SkillLibrary
 from utils.mdn_contracts import CandidateSkillRecord
 from utils.mdn_runtime_pipeline import (
     CertificationResult,
@@ -216,6 +217,47 @@ def test_runtime_result_to_certificate_kwargs_rejects_cvar_epsilon():
             version="test",
             epsilon=0.1,
         )
+
+
+def test_cvar_runtime_certificate_can_be_stored_in_skill_library():
+    model = MotiveDecompositionNetwork(input_dim=8, num_objectives=2)
+    store = WeightSetStore(num_objectives=2)
+    config = RuntimePipelineConfig(
+        gate_type="CVAR",
+        cvar_samples=32,
+        train_support_after_certify=False,
+    )
+    pipeline = RuntimeCertificationPipeline(model=model, weight_store=store, config=config)
+
+    result = pipeline.certify_skill(
+        context=np.array([0.1] * 8, dtype=np.float32),
+        skill_id="skill_cvar_runtime",
+        skill_payoff=1.7,
+        skill_motives=np.array([0.8, 0.4], dtype=np.float32),
+        baseline_stats=_baseline_stats(),
+        weights_used=np.array([0.5, 0.5], dtype=np.float32),
+    )
+    kwargs = certification_result_to_certificate_kwargs(
+        result,
+        timestamp="2026-06-09T12:00:00+00:00",
+        seed=7,
+        gamma=0.99,
+        baseline_id="idle_policy",
+        environment="MO-LunarLander-v3",
+        episode_length=100,
+        version="test",
+    )
+    cert = Certificate(**kwargs)
+    library = SkillLibrary()
+
+    assert result.is_certified is True
+    assert cert.gate_type == "CVAR"
+    assert cert.weight_region_type == "MDN_WX"
+    assert library.add_skill(cert.skill_id, cert, lambda obs: 0) is True
+    entry = library.get_skill(cert.skill_id)
+    assert entry is not None
+    assert entry.gate_type == "CVAR"
+    assert entry.mdn_alpha == cert.mdn_alpha
 
 
 def test_runtime_pipeline_get_support_values():
