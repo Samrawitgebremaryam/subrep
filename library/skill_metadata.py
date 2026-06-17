@@ -28,7 +28,7 @@ class SkillEntry:
 
     def __post_init__(self) -> None:
         """post-init validation to ensure gate_type is valid and matches the certificate."""
-        valid_gates = {"CDS", "PDS"}
+        valid_gates = {"CDS", "PDS", "CVAR"}
         if self.gate_type not in valid_gates:
             raise ValueError(
                 f"gate_type must be one of {valid_gates}, got '{self.gate_type}'"

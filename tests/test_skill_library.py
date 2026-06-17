@@ -72,6 +72,34 @@ def make_pds_certificate(skill_id: str = "cert-pds-001"):
         version="0.1.0",
     )
 
+def make_cvar_certificate(
+    skill_id: str = "cert-cvar-001",
+    *,
+    delta_r: float = 0.5,
+    delta_n: tuple[float, float] = (0.3, 0.2),
+):
+    """Create a CVaR certificate with the MDN audit metadata required to replay it."""
+    return Certificate(
+        skill_id=skill_id,
+        gate_type="CVAR",
+        delta_r=delta_r,
+        delta_n=delta_n,
+        admission_margin=max(0.0, delta_r + min(delta_n)),
+        epsilon=0.0,
+        timestamp=datetime.now().isoformat(),
+        seed=42,
+        gamma=0.99,
+        baseline_id="baseline-noop",
+        environment="MO-LunarLander-v2",
+        episode_length=200,
+        version="0.1.0",
+        weight_region_type=MDN_WX,
+        certification_context=(0.0,) * 8,
+        mdn_alpha=(3.0, 2.0),
+        wx_support_directions=((0.0, 0.1),),
+        wx_support_values=(0.03,),
+    )
+
 def build_populated_library():
     """
     Build a library with 3 skills for query tests:
@@ -112,11 +140,31 @@ def test_skill_entry_creation():
 
 
 def test_skill_entry_rejects_invalid_gate_type():
-    """SkillEntry should reject gate types other than CDS/PDS."""
+    """SkillEntry should reject unknown gate types."""
     cert = make_cds_certificate()
 
     with pytest.raises(ValueError, match="gate_type"):
         SkillEntry(skill_id="x", gate_type="INVALID", certificate=cert)
+
+
+def test_skill_entry_accepts_cvar_with_mdn_audit_fields():
+    cert = make_cvar_certificate("skill-cvar")
+
+    entry = SkillEntry(
+        skill_id="skill-cvar",
+        gate_type="CVAR",
+        certificate=cert,
+        policy=make_dummy_policy(),
+        weight_region_type=cert.weight_region_type,
+        certification_context=cert.certification_context,
+        mdn_alpha=cert.mdn_alpha,
+        wx_support_directions=cert.wx_support_directions,
+        wx_support_values=cert.wx_support_values,
+    )
+
+    assert entry.gate_type == "CVAR"
+    assert entry.weight_region_type == MDN_WX
+    assert entry.mdn_alpha == cert.mdn_alpha
 
 
 def test_skill_entry_rejects_mismatched_gate_type():
@@ -194,6 +242,30 @@ def test_certificate_to_dict_roundtrip():
     assert restored.environment == cert.environment
 
 
+def test_cvar_skill_entry_to_dict_roundtrip():
+    cert = make_cvar_certificate("skill-cvar-rt")
+    entry = SkillEntry(
+        skill_id="skill-cvar-rt",
+        gate_type="CVAR",
+        certificate=cert,
+        policy=make_dummy_policy(),
+        weight_region_type=cert.weight_region_type,
+        certification_context=cert.certification_context,
+        mdn_alpha=cert.mdn_alpha,
+        wx_support_directions=cert.wx_support_directions,
+        wx_support_values=cert.wx_support_values,
+    )
+
+    restored = SkillEntry.from_dict(entry.to_dict())
+
+    assert restored.gate_type == "CVAR"
+    assert restored.weight_region_type == MDN_WX
+    assert restored.certification_context == cert.certification_context
+    assert restored.mdn_alpha == cert.mdn_alpha
+    assert restored.wx_support_directions == cert.wx_support_directions
+    assert restored.wx_support_values == cert.wx_support_values
+
+
 # Add / Get / Remove Tests
 def test_add_certified_skill_succeeds():
     """Adding a skill with a valid certificate should succeed."""
@@ -203,6 +275,35 @@ def test_add_certified_skill_succeeds():
 
     assert result is True
     assert lib.count() == 1
+
+
+def test_add_cvar_skill_succeeds_with_certificate_audit_fields():
+    lib = SkillLibrary()
+    cert = make_cvar_certificate("skill-cvar")
+
+    result = lib.add_skill(cert.skill_id, cert, make_dummy_policy())
+
+    assert result is True
+    entry = lib.get_skill("skill-cvar")
+    assert entry is not None
+    assert entry.gate_type == "CVAR"
+    assert entry.weight_region_type == MDN_WX
+    assert entry.certification_context == cert.certification_context
+    assert entry.mdn_alpha == cert.mdn_alpha
+    assert entry.wx_support_directions == cert.wx_support_directions
+    assert entry.wx_support_values == cert.wx_support_values
+
+
+def test_add_cvar_skill_rejects_failing_certificate():
+    lib = SkillLibrary()
+    cert = make_cvar_certificate(
+        "skill-cvar-bad",
+        delta_r=-1.0,
+        delta_n=(-0.3, -0.2),
+    )
+
+    assert lib.add_skill(cert.skill_id, cert, make_dummy_policy()) is False
+    assert lib.count() == 0
 
 
 def test_add_multiple_skills():

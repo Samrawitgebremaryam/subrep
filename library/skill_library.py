@@ -16,6 +16,7 @@ from utils.cone_utils import validate_simplex_weights
 from utils.weight_set_store import WeightSet
 from certification.certificate_schema import Certificate
 from certification.cds_test import CDSGate
+from certification.cvar_test import CVaRGate
 from certification.pds_test import PDSGate
 
 logger = logging.getLogger(__name__)
@@ -117,26 +118,75 @@ class SkillLibrary:
             if not self.cert_store.contains(certificate.skill_id):
                 return False
 
+        effective_weight_region_type = weight_region_type
+        if effective_weight_region_type == FULL_SIMPLEX and certificate.weight_region_type == MDN_WX:
+            effective_weight_region_type = MDN_WX
+        effective_certification_context = (
+            certification_context
+            if certification_context is not None
+            else certificate.certification_context
+        )
+        effective_mdn_alpha = mdn_alpha if mdn_alpha is not None else certificate.mdn_alpha
+        effective_wx_support_directions = (
+            wx_support_directions
+            if wx_support_directions is not None
+            else certificate.wx_support_directions
+        )
+        effective_wx_support_values = (
+            wx_support_values
+            if wx_support_values is not None
+            else certificate.wx_support_values
+        )
+
         # 2. Mathematical Check (The "Chain of Safety")
         # We re-verify the certificate's math at the library entry point.
         if certificate.gate_type == "CDS":
             gate = CDSGate()
         elif certificate.gate_type == "PDS":
             gate = PDSGate(epsilon=certificate.epsilon)
+        elif certificate.gate_type == "CVAR":
+            gate = CVaRGate()
         else:
             return False
 
         delta_n_vec = np.asarray(certificate.delta_n, dtype=np.float64)
 
+        if certificate.gate_type == "CVAR":
+            if effective_weight_region_type != MDN_WX or effective_mdn_alpha is None:
+                raise ValueError(
+                    f"CVAR skill '{skill_id}' requires MDN_WX mdn_alpha for certificate verification."
+                )
+            if not gate.admit(
+                certificate.delta_r,
+                delta_n_vec,
+                mdn_alpha=np.asarray(effective_mdn_alpha, dtype=np.float64),
+            ):
+                return False
+
+            entry = SkillEntry(
+                skill_id=skill_id,
+                gate_type=certificate.gate_type,
+                certificate=certificate,
+                policy=policy,
+                weight_region_type=effective_weight_region_type,
+                certification_context=effective_certification_context,
+                mdn_alpha=effective_mdn_alpha,
+                wx_support_directions=effective_wx_support_directions,
+                wx_support_values=effective_wx_support_values,
+            )
+
+            self._skills[skill_id] = entry
+            return True
+
         # Build the weight set for gate verification.
         weight_set = None
-        if weight_region_type == MDN_WX:
-            if wx_support_directions is None or wx_support_values is None:
+        if effective_weight_region_type == MDN_WX:
+            if effective_wx_support_directions is None or effective_wx_support_values is None:
                 raise ValueError(
                     f"MDN_WX skill '{skill_id}' requires wx_support_directions and wx_support_values for certificate verification."
                 )
             weight_set = _build_wx_weight_set(
-                wx_support_directions, wx_support_values
+                effective_wx_support_directions, effective_wx_support_values
             )
 
         if not gate.admit(certificate.delta_r, delta_n_vec, weight_set):
@@ -147,11 +197,11 @@ class SkillLibrary:
             gate_type=certificate.gate_type,
             certificate=certificate,
             policy=policy,
-            weight_region_type=weight_region_type,
-            certification_context=certification_context,
-            mdn_alpha=mdn_alpha,
-            wx_support_directions=wx_support_directions,
-            wx_support_values=wx_support_values,
+            weight_region_type=effective_weight_region_type,
+            certification_context=effective_certification_context,
+            mdn_alpha=effective_mdn_alpha,
+            wx_support_directions=effective_wx_support_directions,
+            wx_support_values=effective_wx_support_values,
         )
 
         self._skills[skill_id] = entry
