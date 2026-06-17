@@ -12,7 +12,7 @@ from datetime import datetime
 from math import isfinite
 from typing import Any
 
-_VALID_GATE_TYPES = {"CDS", "PDS"}
+_VALID_GATE_TYPES = {"CDS", "PDS", "CVAR"}
 _VALID_WEIGHT_REGION_TYPES = {"FULL_SIMPLEX", "MDN_WX"}
 _MDN_AUDIT_FIELDS = (
     "certification_context",
@@ -106,9 +106,12 @@ class Certificate:
         if self.episode_length <= 0:
             raise ValueError(f"episode_length must be > 0, got {self.episode_length}")
 
-        # CDS has no epsilon budget in this phase.
-        if gate_type == "CDS" and float(self.epsilon) != 0.0:
-            raise ValueError("CDS certificates must have epsilon == 0.0")
+        # CDS and CVaR have no epsilon budget in this phase.
+        if gate_type in {"CDS", "CVAR"} and float(self.epsilon) != 0.0:
+            raise ValueError(f"{gate_type} certificates must have epsilon == 0.0")
+
+        if gate_type == "CVAR" and weight_region_type != "MDN_WX":
+            raise ValueError("CVAR certificates must use MDN_WX audit metadata")
 
         if weight_region_type == "FULL_SIMPLEX":
             for field in _MDN_AUDIT_FIELDS:

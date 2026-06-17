@@ -11,7 +11,7 @@ import numpy as np
 from utils.cone_utils import validate_simplex_weights
 
 
-_VALID_GATE_TYPES = {"CDS", "PDS"}
+_VALID_GATE_TYPES = {"CDS", "PDS", "CVAR"}
 
 
 @dataclass(frozen=True)

@@ -57,6 +57,10 @@ def certification_result_to_certificate_kwargs(
         certificate_epsilon = 0.0 if epsilon is None else float(epsilon)
         if certificate_epsilon != 0.0:
             raise ValueError("CDS certificates must use epsilon == 0.0")
+    elif gate_type == "CVAR":
+        certificate_epsilon = 0.0 if epsilon is None else float(epsilon)
+        if certificate_epsilon != 0.0:
+            raise ValueError("CVAR certificates must use epsilon == 0.0")
     elif gate_type == "PDS":
         if epsilon is None:
             raise ValueError("PDS certificate conversion requires epsilon")

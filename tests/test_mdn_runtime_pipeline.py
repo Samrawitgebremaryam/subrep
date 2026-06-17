@@ -153,7 +153,7 @@ def test_runtime_result_to_certificate_kwargs_preserves_audit_fields():
     assert cert.wx_support_values == result.wx_support_values
 
 
-def test_runtime_result_to_certificate_kwargs_rejects_unsupported_gate_type():
+def test_runtime_result_to_certificate_kwargs_accepts_cvar():
     result = CertificationResult(
         skill_id="skill_cvar",
         is_certified=True,
@@ -169,7 +169,42 @@ def test_runtime_result_to_certificate_kwargs_rejects_unsupported_gate_type():
         wx_support_values=(0.03,),
     )
 
-    with pytest.raises(ValueError, match="Unsupported certificate gate_type"):
+    kwargs = certification_result_to_certificate_kwargs(
+        result,
+        timestamp="2026-06-09T12:00:00+00:00",
+        seed=7,
+        gamma=0.99,
+        baseline_id="idle_policy",
+        environment="MO-LunarLander-v3",
+        episode_length=100,
+        version="test",
+    )
+    cert = Certificate(**kwargs)
+
+    assert kwargs["gate_type"] == "CVAR"
+    assert kwargs["epsilon"] == 0.0
+    assert cert.gate_type == "CVAR"
+    assert cert.epsilon == 0.0
+    assert cert.weight_region_type == "MDN_WX"
+
+
+def test_runtime_result_to_certificate_kwargs_rejects_cvar_epsilon():
+    result = CertificationResult(
+        skill_id="skill_cvar",
+        is_certified=True,
+        gate_type="CVAR",
+        was_already_certified=False,
+        admission_margin=0.1,
+        delta_r=1.0,
+        delta_n=(0.2, 0.3),
+        weight_region_type="MDN_WX",
+        certification_context=(0.1, 0.2),
+        mdn_alpha=(1.0, 2.0),
+        wx_support_directions=((0.0, 0.1),),
+        wx_support_values=(0.03,),
+    )
+
+    with pytest.raises(ValueError, match="CVAR certificates must use epsilon == 0.0"):
         certification_result_to_certificate_kwargs(
             result,
             timestamp="2026-06-09T12:00:00+00:00",
@@ -179,6 +214,7 @@ def test_runtime_result_to_certificate_kwargs_rejects_unsupported_gate_type():
             environment="MO-LunarLander-v3",
             episode_length=100,
             version="test",
+            epsilon=0.1,
         )
 
 
