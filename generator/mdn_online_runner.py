@@ -61,6 +61,9 @@ class MDNOnlineRunner:
         certificate_store: Optional[Any] = None,
         certificate_metadata: Optional[dict[str, Any]] = None,
         skill_library: Optional[SkillLibrary] = None,
+        behavior_policy: str = "argmax",
+        behavior_temperature: float = 1.0,
+        behavior_seed: int | None = None,
     ) -> None:
         if save_every_n_steps <= 0:
             raise ValueError("save_every_n_steps must be positive")
@@ -77,7 +80,16 @@ class MDNOnlineRunner:
         self.checkpoint_path = checkpoint_path
         self.store_path = store_path or certification_pipeline.config.store_path
         self.save_every_n_steps = int(save_every_n_steps)
-        self.selector = MDNRuntimeSelector(model=model, device=device or str(policy_trainer.device))
+        self.behavior_policy = behavior_policy
+        self.behavior_temperature = float(behavior_temperature)
+        self.behavior_seed = behavior_seed
+        self.selector = MDNRuntimeSelector(
+            model=model,
+            device=device or str(policy_trainer.device),
+            behavior_policy=behavior_policy,
+            behavior_temperature=behavior_temperature,
+            behavior_seed=behavior_seed,
+        )
         self.certificate_store = certificate_store
         self.certificate_metadata: dict[str, Any] = dict(certificate_metadata) if certificate_metadata else {}
         self.skill_library = skill_library
@@ -413,6 +425,9 @@ class MDNOnlineRunner:
         certificate_store: Optional[Any] = None,
         certificate_metadata: Optional[dict[str, Any]] = None,
         skill_library: Optional[SkillLibrary] = None,
+        behavior_policy: str = "argmax",
+        behavior_temperature: float = 1.0,
+        behavior_seed: int | None = None,
     ) -> "MDNOnlineRunner":
         """Load persisted runtime state into a new online runner."""
         runner = cls(
@@ -430,6 +445,9 @@ class MDNOnlineRunner:
             certificate_store=certificate_store,
             certificate_metadata=certificate_metadata,
             skill_library=skill_library,
+            behavior_policy=behavior_policy,
+            behavior_temperature=behavior_temperature,
+            behavior_seed=behavior_seed,
         )
         checkpoint_file = Path(checkpoint_path)
         if checkpoint_file.exists():
@@ -439,7 +457,13 @@ class MDNOnlineRunner:
                 device=device or str(policy_trainer.device),
             )
             runner.policy_trainer = restored
-            runner.selector = MDNRuntimeSelector(model=restored.model, device=device or str(restored.device))
+            runner.selector = MDNRuntimeSelector(
+                model=restored.model,
+                device=device or str(restored.device),
+                behavior_policy=behavior_policy,
+                behavior_temperature=behavior_temperature,
+                behavior_seed=behavior_seed,
+            )
             runner.model = restored.model
 
         store_file = Path(runner.store_path) if runner.store_path is not None else None

@@ -25,6 +25,9 @@ def _make_runner(
     tmp_path,
     save_every_n_steps: int = 10,
     skill_library: SkillLibrary | None = None,
+    behavior_policy: str = "argmax",
+    behavior_temperature: float = 1.0,
+    behavior_seed: int | None = None,
 ) -> MDNOnlineRunner:
     model = MotiveDecompositionNetwork(input_dim=8, num_objectives=2)
     store = WeightSetStore(num_objectives=2)
@@ -48,6 +51,9 @@ def _make_runner(
         save_every_n_steps=save_every_n_steps,
         device="cpu",
         skill_library=skill_library,
+        behavior_policy=behavior_policy,
+        behavior_temperature=behavior_temperature,
+        behavior_seed=behavior_seed,
     )
 
 
@@ -107,6 +113,27 @@ def test_decision_record_has_behavior_probability(tmp_path):
 
     assert result.decision_record is not None
     assert result.decision_record.behavior_probability is not None
+
+
+def test_softmax_behavior_policy_records_nontrivial_probability(tmp_path):
+    runner = _make_runner(
+        tmp_path,
+        behavior_policy="softmax",
+        behavior_temperature=1.0,
+        behavior_seed=0,
+    )
+    result = runner.step(
+        observation=np.array([0.1] * 8, dtype=np.float32),
+        candidate_skill_payloads=[
+            _candidate_payload("skill_a", 1.7, (0.8, 0.4)),
+            _candidate_payload("skill_b", 1.7, (0.8, 0.4)),
+        ],
+        execute_skill=_execute_skill,
+    )
+
+    assert result.behavior_probability == pytest.approx(0.5)
+    assert result.decision_record is not None
+    assert result.decision_record.behavior_probability == pytest.approx(0.5)
 
 
 def test_wx_expands_on_certification(tmp_path):

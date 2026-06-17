@@ -84,11 +84,21 @@ class MDNRuntimeSelector:
         self,
         model: MotiveDecompositionNetwork,
         device: Optional[str] = None,
+        behavior_policy: str = "argmax",
+        behavior_temperature: float = 1.0,
+        behavior_seed: int | None = None,
     ) -> None:
         self.model = model
         self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
         self.model.to(self.device)
         self.model.eval()
+        self.behavior_policy = behavior_policy.strip().lower()
+        if self.behavior_policy not in {"argmax", "softmax"}:
+            raise ValueError("behavior_policy must be 'argmax' or 'softmax'")
+        self.behavior_temperature = float(behavior_temperature)
+        if not np.isfinite(self.behavior_temperature) or self.behavior_temperature <= 0.0:
+            raise ValueError("behavior_temperature must be finite and positive")
+        self._rng = np.random.default_rng(behavior_seed)
 
     def select(
         self,
@@ -118,7 +128,10 @@ class MDNRuntimeSelector:
 
         alpha_np, support_np, weights = self._infer_mdn(obs)
 
-        selected_skill_id, selected_score = select_best_candidate(certified, weights)
+        selected_skill_id, selected_score, behavior_probability = self._select_candidate_behavior(
+            certified,
+            weights,
+        )
 
         return SelectionResult(
             selected_skill_id=selected_skill_id,
@@ -126,7 +139,7 @@ class MDNRuntimeSelector:
             weights_used=weights,
             alpha=alpha_np,
             support_values=support_np,
-            behavior_probability=1.0,
+            behavior_probability=behavior_probability,
             candidate_skills=tuple(candidate_skills),
             context=tuple(float(v) for v in obs),
         )
@@ -149,7 +162,7 @@ class MDNRuntimeSelector:
         if not admissible_entries:
             raise ValueError("select_from_library() requires at least one admissible stored skill")
 
-        selected_skill_id, selected_score = select_best_skill_entry(
+        selected_skill_id, selected_score, behavior_probability = self._select_entry_behavior(
             admissible_entries,
             weights,
         )
@@ -163,7 +176,7 @@ class MDNRuntimeSelector:
             weights_used=weights,
             alpha=alpha_np,
             support_values=support_np,
-            behavior_probability=1.0,
+            behavior_probability=behavior_probability,
             candidate_skills=candidate_records,
             context=tuple(float(v) for v in obs),
         )
@@ -188,6 +201,52 @@ class MDNRuntimeSelector:
         weights = alpha_to_mean_weights(alpha_np)
         return alpha_np, support_np, weights
 
+    def _select_candidate_behavior(
+        self,
+        candidates: list[CandidateSkillRecord],
+        weights: np.ndarray,
+    ) -> tuple[str, float, float]:
+        if self.behavior_policy == "argmax":
+            selected_skill_id, selected_score = select_best_candidate(candidates, weights)
+            return selected_skill_id, float(selected_score), 1.0
+
+        scores = np.asarray(
+            [candidate.delta_r + float(np.dot(weights, np.asarray(candidate.delta_n, dtype=np.float64))) for candidate in candidates],
+            dtype=np.float64,
+        )
+        selected_index, probabilities = self._sample_softmax_index(scores)
+        selected = candidates[selected_index]
+        return selected.skill_id, float(scores[selected_index]), float(probabilities[selected_index])
+
+    def _select_entry_behavior(
+        self,
+        entries: list[SkillEntry],
+        weights: np.ndarray,
+    ) -> tuple[str, float, float]:
+        if self.behavior_policy == "argmax":
+            selected_skill_id, selected_score = select_best_skill_entry(entries, weights)
+            return selected_skill_id, float(selected_score), 1.0
+
+        scores = np.asarray(
+            [entry.delta_r + float(np.dot(weights, np.asarray(entry.delta_n, dtype=np.float64))) for entry in entries],
+            dtype=np.float64,
+        )
+        selected_index, probabilities = self._sample_softmax_index(scores)
+        selected = entries[selected_index]
+        return selected.skill_id, float(scores[selected_index]), float(probabilities[selected_index])
+
+    def _sample_softmax_index(self, scores: np.ndarray) -> tuple[int, np.ndarray]:
+        if scores.ndim != 1 or len(scores) == 0:
+            raise ValueError("scores must be a non-empty 1D vector")
+        if not np.all(np.isfinite(scores)):
+            raise ValueError("scores must contain only finite values")
+        logits = scores / self.behavior_temperature
+        logits = logits - np.max(logits)
+        exp_logits = np.exp(logits)
+        probabilities = exp_logits / np.sum(exp_logits)
+        selected_index = int(self._rng.choice(len(scores), p=probabilities))
+        return selected_index, probabilities
+
     @classmethod
     def from_checkpoint(
         cls,
@@ -196,6 +255,9 @@ class MDNRuntimeSelector:
         num_objectives: int,
         num_skills: int = 128,
         device: Optional[str] = None,
+        behavior_policy: str = "argmax",
+        behavior_temperature: float = 1.0,
+        behavior_seed: int | None = None,
     ) -> "MDNRuntimeSelector":
         """Load a trained MDN from a checkpoint file."""
         model = MotiveDecompositionNetwork(
@@ -206,7 +268,13 @@ class MDNRuntimeSelector:
         checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
         state = checkpoint.get("model_state_dict", checkpoint)
         model.load_state_dict(state)
-        return cls(model=model, device=device)
+        return cls(
+            model=model,
+            device=device,
+            behavior_policy=behavior_policy,
+            behavior_temperature=behavior_temperature,
+            behavior_seed=behavior_seed,
+        )
 
 
 def _candidate_record_from_entry(entry: SkillEntry) -> CandidateSkillRecord:

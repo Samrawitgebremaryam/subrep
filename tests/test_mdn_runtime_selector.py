@@ -132,6 +132,30 @@ class TestMDNRuntimeSelectorSelect:
         result = selector.select(_obs(), candidates)
         assert result.behavior_probability == pytest.approx(1.0)
 
+    def test_softmax_behavior_logs_nontrivial_probability(self):
+        model = _make_model()
+        selector = MDNRuntimeSelector(
+            model,
+            behavior_policy="softmax",
+            behavior_temperature=1.0,
+            behavior_seed=0,
+        )
+        candidates = [
+            _make_candidate("skill_a", 0.5, (0.0, 0.0), True),
+            _make_candidate("skill_b", 0.5, (0.0, 0.0), True),
+        ]
+
+        result = selector.select(_obs(), candidates)
+
+        assert result.selected_skill_id in {"skill_a", "skill_b"}
+        assert result.behavior_probability == pytest.approx(0.5)
+
+    def test_softmax_behavior_rejects_invalid_temperature(self):
+        model = _make_model()
+
+        with pytest.raises(ValueError, match="behavior_temperature"):
+            MDNRuntimeSelector(model, behavior_policy="softmax", behavior_temperature=0.0)
+
     def test_behavior_probability_is_one_with_single_certified_candidate(self):
         model = _make_model()
         selector = MDNRuntimeSelector(model)
@@ -202,6 +226,23 @@ class TestMDNRuntimeSelectorSelect:
         result = selector.select_from_library(_obs(), library)
 
         assert result.behavior_probability == pytest.approx(1.0)
+
+    def test_select_from_library_softmax_logs_nontrivial_probability(self):
+        model = _make_model()
+        selector = MDNRuntimeSelector(
+            model,
+            behavior_policy="softmax",
+            behavior_temperature=1.0,
+            behavior_seed=0,
+        )
+        library = SkillLibrary()
+        assert library.add_skill("skill_a", _make_certificate("skill_a", 0.5, (0.0, 0.0)), lambda obs: None)
+        assert library.add_skill("skill_b", _make_certificate("skill_b", 0.5, (0.0, 0.0)), lambda obs: None)
+
+        result = selector.select_from_library(_obs(), library)
+
+        assert result.selected_skill_id in {"skill_a", "skill_b"}
+        assert result.behavior_probability == pytest.approx(0.5)
 
     def test_select_from_library_can_select_cvar_skill(self):
         model = _make_model()
