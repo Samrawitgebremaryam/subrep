@@ -14,6 +14,7 @@ from torch.utils.data import DataLoader, Dataset, random_split
 
 from baseline.improvement_calculator import ImprovementCalculator
 from certification.cds_test import CDSGate
+from certification.cvar_test import CVaRGate
 from certification.pds_test import PDSGate
 from generator.mdn import MotiveDecompositionNetwork
 from utils.mdn_selection import alpha_to_mean_weights
@@ -461,6 +462,7 @@ def build_auxiliary_record(
     all_candidate_delta_r: Optional[tuple[float, ...]] = None,
     all_candidate_delta_n: Optional[tuple[tuple[float, ...], ...]] = None,
     selected_candidate_index: Optional[int] = None,
+    mdn_alpha: Optional[np.ndarray] = None,
 ) -> AuxiliaryTrainingRecord:
 
     context = tuple(float(v) for v in np.asarray(context, dtype=np.float32).reshape(-1))
@@ -475,8 +477,12 @@ def build_auxiliary_record(
             accept_label = CDSGate().admit(delta_r, delta_n, weight_set=weight_set)
         elif gate_type_normalized == "PDS":
             accept_label = PDSGate(epsilon=0.1 if epsilon is None else float(epsilon)).admit(delta_r, delta_n, weight_set=weight_set)
+        elif gate_type_normalized == "CVAR":
+            if mdn_alpha is None:
+                raise ValueError("mdn_alpha is required when gate_type='CVAR'")
+            accept_label = CVaRGate().admit(delta_r, delta_n, mdn_alpha=np.asarray(mdn_alpha, dtype=np.float32))
         else:
-            raise ValueError(f"gate_type must be 'CDS' or 'PDS', got {gate_type!r}")
+            raise ValueError(f"gate_type must be 'CDS', 'PDS', or 'CVAR', got {gate_type!r}")
 
     if use_ips and use_doubly_robust:
         raise ValueError("use_ips and use_doubly_robust cannot both be True")

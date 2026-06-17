@@ -98,6 +98,32 @@ def test_build_auxiliary_record_uses_discounted_target_when_trajectory_exists():
     assert len(record.q_target) == 2
 
 
+def test_build_auxiliary_record_supports_cvar_gate():
+    record = build_auxiliary_record(
+        context=(0.1,) * 8,
+        skill_id=1,
+        payoff=1.7,
+        motives=(0.8, 0.4),
+        baseline_stats=_baseline_stats(),
+        gate_type="CVAR",
+        mdn_alpha=np.array([3.0, 2.0], dtype=np.float32),
+    )
+
+    assert record.accept_label == 1.0
+
+
+def test_build_auxiliary_record_rejects_cvar_without_mdn_alpha():
+    with pytest.raises(ValueError, match="mdn_alpha"):
+        build_auxiliary_record(
+            context=(0.1,) * 8,
+            skill_id=1,
+            payoff=1.7,
+            motives=(0.8, 0.4),
+            baseline_stats=_baseline_stats(),
+            gate_type="CVAR",
+        )
+
+
 def test_build_auxiliary_record_raises_for_ips_without_probabilities():
     try:
         build_auxiliary_record(

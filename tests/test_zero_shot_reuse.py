@@ -46,6 +46,33 @@ def _make_cert(
     )
 
 
+def _make_cvar_cert(
+    skill_id: str = "cvar-skill",
+    delta_r: float = 0.8,
+    delta_n: tuple[float, float] = (0.5, 0.3),
+) -> Certificate:
+    return Certificate(
+        skill_id=skill_id,
+        gate_type="CVAR",
+        delta_r=delta_r,
+        delta_n=delta_n,
+        admission_margin=max(0.0, delta_r + min(delta_n)),
+        epsilon=0.0,
+        timestamp=datetime.now(timezone.utc).isoformat(),
+        seed=42,
+        gamma=0.99,
+        baseline_id="baseline-noop",
+        environment="MO-LunarLander-v2",
+        episode_length=200,
+        version="0.1.0",
+        weight_region_type=MDN_WX,
+        certification_context=(0.0,) * 8,
+        mdn_alpha=(3.0, 2.0),
+        wx_support_directions=((0.0, 0.1),),
+        wx_support_values=(0.03,),
+    )
+
+
 @pytest.fixture
 def evaluator():
     return ZeroShotEvaluator()
@@ -168,6 +195,38 @@ class TestMDNContextualReuse:
             support_values=self.SPEC_VALUES,
         )
         assert result is False
+
+    def test_cvar_reuse_uses_mdn_alpha(self, evaluator):
+        cert = _make_cvar_cert(skill_id="cvar-pass")
+
+        result = evaluator.is_safe_mathematically(
+            cert,
+            [0.5, 0.5],
+            mdn_alpha=[3.0, 2.0],
+        )
+
+        assert result is True
+
+    def test_cvar_reuse_rejects_failing_distribution(self, evaluator):
+        cert = _make_cvar_cert(
+            skill_id="cvar-fail",
+            delta_r=-1.0,
+            delta_n=(-0.3, -0.2),
+        )
+
+        result = evaluator.is_safe_mathematically(
+            cert,
+            [0.5, 0.5],
+            mdn_alpha=[3.0, 2.0],
+        )
+
+        assert result is False
+
+    def test_cvar_reuse_requires_mdn_alpha(self, evaluator):
+        cert = _make_cvar_cert(skill_id="cvar-missing-alpha")
+
+        with pytest.raises(ValueError, match="mdn_alpha"):
+            evaluator.is_safe_mathematically(cert, [0.5, 0.5])
 
 
 # ── Motive-Shift Coverage ────────────────────────────────────────────────────

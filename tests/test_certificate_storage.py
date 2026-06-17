@@ -46,6 +46,29 @@ def _sample_certificate(
     )
 
 
+def _sample_cvar_certificate(skill_id: str = "cvar_1") -> Certificate:
+    return Certificate(
+        skill_id=skill_id,
+        gate_type="CVAR",
+        delta_r=0.5,
+        delta_n=(0.2, -0.1),
+        admission_margin=0.3,
+        epsilon=0.0,
+        timestamp=datetime.now().isoformat(timespec="seconds"),
+        seed=42,
+        gamma=0.99,
+        baseline_id="idle_policy",
+        environment="MO-LunarLander-v0",
+        episode_length=120,
+        version="subrep-q1-v0.1",
+        weight_region_type="MDN_WX",
+        certification_context=(0.0,) * 8,
+        mdn_alpha=(3.0, 2.0),
+        wx_support_directions=((0.0, 0.1),),
+        wx_support_values=(0.03,),
+    )
+
+
 def test_certificate_gate_type_normalization():
     """Gate labels should normalize to canonical uppercase."""
     cert = _sample_certificate(gate_type="cds")
@@ -153,14 +176,18 @@ def test_query_by_gate_type_filters_and_normalizes():
         delta_n=(0.1, -0.4),
         admission_margin=0.05,
     )
+    cvar = _sample_cvar_certificate(skill_id="cvar_1")
     store.add(cds)
     store.add(pds)
+    store.add(cvar)
 
     cds_results = store.query_by_gate_type("cds")
     pds_results = store.query_by_gate_type("PDS")
+    cvar_results = store.query_by_gate_type("cvar")
 
     assert [c.skill_id for c in cds_results] == ["cds_1"]
     assert [c.skill_id for c in pds_results] == ["pds_1"]
+    assert [c.skill_id for c in cvar_results] == ["cvar_1"]
 
 
 def test_query_by_gate_type_invalid_value_raises():
@@ -189,14 +216,17 @@ def test_query_by_weights_admissibility_logic():
         delta_n=(0.0, -0.3),
         admission_margin=0.01,
     )
+    cvar_pass = _sample_cvar_certificate(skill_id="cvar_pass")
     store.add(cds)
     store.add(pds_pass)
     store.add(pds_fail)
+    store.add(cvar_pass)
 
     results = store.query_by_weights([0.5, 0.5])
     ids = {c.skill_id for c in results}
     assert "cds_global" in ids
     assert "pds_pass" in ids
+    assert "cvar_pass" in ids
     assert "pds_fail" not in ids
 
     results_alt = store.query_by_weights([1.0, 0.0])

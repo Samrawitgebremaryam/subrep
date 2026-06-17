@@ -50,6 +50,36 @@ def test_build_candidate_skill_record_supports_pds_epsilon():
     assert np.isclose(record.epsilon, 0.2)
 
 
+def test_build_candidate_skill_record_supports_cvar_mdn_alpha():
+    record = build_candidate_skill_record(
+        skill_id="skill_cvar",
+        skill_payoff=1.7,
+        skill_motives=np.array([0.8, 0.4], dtype=np.float32),
+        baseline_stats=_baseline_stats(),
+        gate_type="CVaR",
+        mdn_alpha=(3.0, 2.0),
+    )
+
+    assert record.gate_type == "CVAR"
+    assert record.epsilon == 0.0
+    assert record.is_certified is True
+
+
+def test_build_candidate_skill_record_rejects_cvar_without_mdn_alpha():
+    try:
+        build_candidate_skill_record(
+            skill_id="skill_cvar",
+            skill_payoff=1.7,
+            skill_motives=np.array([0.8, 0.4], dtype=np.float32),
+            baseline_stats=_baseline_stats(),
+            gate_type="CVAR",
+        )
+    except ValueError as exc:
+        assert "mdn_alpha" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError for CVAR candidate without mdn_alpha")
+
+
 def test_prepared_candidate_outcome_normalizes_context_and_preserves_metadata():
     outcome = PreparedCandidateOutcome(
         context=np.array([0.1] * 14, dtype=np.float32),
@@ -63,6 +93,20 @@ def test_prepared_candidate_outcome_normalizes_context_and_preserves_metadata():
     assert len(outcome.context) == 14
     assert outcome.gate_type == "CDS"
     assert outcome.metadata["source"] == "prepared"
+
+
+def test_prepared_candidate_outcome_accepts_cvar_mdn_alpha():
+    outcome = PreparedCandidateOutcome(
+        context=np.array([0.1] * 8, dtype=np.float32),
+        skill_id="skill_cvar",
+        payoff=1.7,
+        motives=(0.8, 0.4),
+        gate_type="cvar",
+        mdn_alpha=(3.0, 2.0),
+    )
+
+    assert outcome.gate_type == "CVAR"
+    assert outcome.mdn_alpha == (3.0, 2.0)
 
 
 def test_build_candidate_skill_records_rejects_missing_outcome_fields():

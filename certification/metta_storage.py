@@ -44,11 +44,11 @@ class CertificateStore:
         return atom_to_cert(atom)
 
     def query_by_gate_type(self, gate_type: str) -> list[Certificate]:
-        """Return certificates matching gate type ('CDS' or 'PDS')."""
+        """Return certificates matching gate type ('CDS', 'PDS', or 'CVAR')."""
         # Normalize input to match schema normalization behavior.
         normalized = gate_type.strip().upper()
-        if normalized not in {"CDS", "PDS"}:
-            raise ValueError(f"gate_type must be 'CDS' or 'PDS', got {gate_type!r}")
+        if normalized not in {"CDS", "PDS", "CVAR"}:
+            raise ValueError(f"gate_type must be 'CDS', 'PDS', or 'CVAR', got {gate_type!r}")
 
         return [c for c in self.load_all() if c.gate_type == normalized]
 
@@ -67,7 +67,7 @@ class CertificateStore:
                 # CDS is globally admissible under the simplex assumption.
                 results.append(cert)
                 continue
-            # PDS check from project task: delta_r + w^T delta_n >= -epsilon.
+            # PDS/CVAR point query: delta_r + w^T delta_n must pass for this weight.
             score = float(cert.delta_r) + float(np.dot(w, np.asarray(cert.delta_n, dtype=float)))
             if score >= -float(cert.epsilon):
                 results.append(cert)

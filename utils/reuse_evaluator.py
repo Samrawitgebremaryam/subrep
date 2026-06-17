@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import numpy as np
 from certification.certificate_schema import Certificate
+from certification.cvar_test import CVaRGate
 
 # ── Region-type constants ────────────────────────────────────────────────────
 FULL_SIMPLEX = "FULL_SIMPLEX"
@@ -43,6 +44,7 @@ class ZeroShotEvaluator:
         new_weight: list | np.ndarray,
         support_directions: list | np.ndarray | None = None,
         support_values: list | np.ndarray | None = None,
+        mdn_alpha: list | np.ndarray | None = None,
     ) -> bool:
         """Check whether a certified skill is safe to reuse at *new_weight*.
 
@@ -59,6 +61,15 @@ class ZeroShotEvaluator:
         """
         w = np.asarray(new_weight, dtype=np.float64)
         self._validate_simplex(w)
+
+        if certificate.gate_type == "CVAR":
+            if mdn_alpha is None:
+                raise ValueError("CVAR reuse validation requires mdn_alpha")
+            return CVaRGate().admit(
+                certificate.delta_r,
+                np.asarray(certificate.delta_n, dtype=np.float64),
+                mdn_alpha=np.asarray(mdn_alpha, dtype=np.float64),
+            )
 
         # ── Mode 1: Full-simplex global reuse ────────────────────────────
         if support_directions is None or support_values is None:

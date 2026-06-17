@@ -9,6 +9,7 @@ import numpy as np
 
 from baseline.improvement_calculator import ImprovementCalculator
 from certification.cds_test import CDSGate
+from certification.cvar_test import CVaRGate
 from certification.pds_test import PDSGate
 from utils.mdn_contracts import CandidateSkillRecord, MDNDecisionRecord
 from utils.mdn_logging import build_decision_record
@@ -26,6 +27,7 @@ class PreparedCandidateOutcome:
     metadata: dict[str, Any] = field(default_factory=dict)
     gate_type: str = "CDS"
     epsilon: float | None = None
+    mdn_alpha: tuple[float, ...] | None = None
 
     def __post_init__(self) -> None:
         context = np.asarray(self.context, dtype=np.float32).reshape(-1)
@@ -54,8 +56,8 @@ class PreparedCandidateOutcome:
             raise ValueError(f"metadata must be a dict, got {type(self.metadata).__name__}")
 
         gate_type = self.gate_type.strip().upper()
-        if gate_type not in {"CDS", "PDS"}:
-            raise ValueError(f"gate_type must be 'CDS' or 'PDS', got {self.gate_type!r}")
+        if gate_type not in {"CDS", "PDS", "CVAR"}:
+            raise ValueError(f"gate_type must be 'CDS', 'PDS', or 'CVAR', got {self.gate_type!r}")
         object.__setattr__(self, "gate_type", gate_type)
 
         if self.epsilon is not None:
@@ -63,6 +65,12 @@ class PreparedCandidateOutcome:
             if not np.isfinite(epsilon) or epsilon < 0.0:
                 raise ValueError(f"epsilon must be finite and non-negative, got {self.epsilon}")
             object.__setattr__(self, "epsilon", epsilon)
+
+        if self.mdn_alpha is not None:
+            mdn_alpha = _coerce_mdn_alpha(self.mdn_alpha, expected_len=2)
+            object.__setattr__(self, "mdn_alpha", tuple(float(v) for v in mdn_alpha))
+        if gate_type == "CVAR" and self.mdn_alpha is None:
+            raise ValueError("CVAR prepared outcomes require mdn_alpha")
 
 
 def build_candidate_skill_record(
@@ -76,6 +84,7 @@ def build_candidate_skill_record(
     baseline_id: str | None = None,
     epsilon: float | None = None,
     weight_set: WeightSet | None = None,
+    mdn_alpha: tuple[float, ...] | np.ndarray | None = None,
 ) -> CandidateSkillRecord:
     """Build a certified-candidate record from baseline-relative improvements."""
     calculator = ImprovementCalculator(baseline_stats)
@@ -90,16 +99,26 @@ def build_candidate_skill_record(
         gate = PDSGate(epsilon=0.1 if epsilon is None else float(epsilon))
         effective_epsilon = gate.get_epsilon()
         admission_margin = gate.get_admission_margin(delta_r, delta_n, weight_set=weight_set)
+    elif gate_type_normalized == "CVAR":
+        gate = CVaRGate()
+        effective_epsilon = 0.0
+        alpha = _coerce_mdn_alpha(mdn_alpha, expected_len=len(delta_n))
+        admission_margin = gate.get_cvar(delta_r, delta_n, mdn_alpha=alpha)
     else:
-        raise ValueError(f"gate_type must be 'CDS' or 'PDS', got {gate_type!r}")
+        raise ValueError(f"gate_type must be 'CDS', 'PDS', or 'CVAR', got {gate_type!r}")
 
-    is_certified = gate.admit(delta_r, delta_n, weight_set=weight_set)
+    if gate_type_normalized == "CVAR":
+        is_certified = gate.admit(delta_r, delta_n, mdn_alpha=alpha)
+        record_gate_type = "CVAR"
+    else:
+        is_certified = gate.admit(delta_r, delta_n, weight_set=weight_set)
+        record_gate_type = gate.get_gate_type()
     return CandidateSkillRecord(
         skill_id=skill_id,
         delta_r=delta_r,
         delta_n=tuple(float(v) for v in delta_n),
         is_certified=is_certified,
-        gate_type=gate.get_gate_type(),
+        gate_type=record_gate_type,
         metadata={} if metadata is None else dict(metadata),
         admission_margin=admission_margin,
         epsilon=effective_epsilon,
@@ -135,6 +154,7 @@ def build_candidate_skill_records(
                 baseline_id=baseline_id,
                 epsilon=prepared.epsilon,
                 weight_set=weight_set,
+                mdn_alpha=prepared.mdn_alpha,
             )
         )
     return tuple(records)
@@ -211,4 +231,20 @@ def _coerce_prepared_candidate_outcome(
         metadata={} if outcome.get("metadata") is None else dict(outcome["metadata"]),
         gate_type=str(outcome.get("gate_type", default_gate_type)),
         epsilon=default_epsilon if outcome.get("epsilon") is None else float(outcome["epsilon"]),
+        mdn_alpha=None if outcome.get("mdn_alpha") is None else tuple(float(v) for v in outcome["mdn_alpha"]),
     )
+
+
+def _coerce_mdn_alpha(
+    mdn_alpha: tuple[float, ...] | np.ndarray | None,
+    *,
+    expected_len: int,
+) -> np.ndarray:
+    if mdn_alpha is None:
+        raise ValueError("CVAR candidate records require mdn_alpha")
+    alpha = np.asarray(mdn_alpha, dtype=np.float32).reshape(-1)
+    if alpha.shape != (expected_len,):
+        raise ValueError(f"mdn_alpha must have shape ({expected_len},), got {alpha.shape}")
+    if not np.all(np.isfinite(alpha)) or np.any(alpha <= 0.0):
+        raise ValueError("mdn_alpha must contain only positive finite values")
+    return alpha
