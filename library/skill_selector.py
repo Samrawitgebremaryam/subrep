@@ -139,6 +139,7 @@ class SkillSelector:
             current_weight=weight,
             support_directions=support_directions,
             support_values=support_values,
+            mdn_alpha=alpha_np,
         )
 
         if not admissible:

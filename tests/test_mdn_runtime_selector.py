@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from datetime import datetime
+from unittest.mock import patch
 
 import numpy as np
 import pytest
+import torch
 
 from certification.certificate_schema import Certificate
 from generator.mdn import MotiveDecompositionNetwork
@@ -51,6 +53,29 @@ def _make_certificate(skill_id: str, delta_r: float, delta_n: tuple[float, float
         environment="mo-lunar-lander-v3",
         episode_length=1,
         version="1.0",
+    )
+
+
+def _make_cvar_certificate(skill_id: str, delta_r: float, delta_n: tuple[float, float]) -> Certificate:
+    return Certificate(
+        skill_id=skill_id,
+        gate_type="CVAR",
+        delta_r=delta_r,
+        delta_n=delta_n,
+        admission_margin=max(0.0, delta_r + min(delta_n)),
+        epsilon=0.0,
+        timestamp=datetime.now().isoformat(),
+        seed=0,
+        gamma=1.0,
+        baseline_id="default",
+        environment="mo-lunar-lander-v3",
+        episode_length=1,
+        version="1.0",
+        weight_region_type="MDN_WX",
+        certification_context=(0.0,) * 8,
+        mdn_alpha=(3.0, 2.0),
+        wx_support_directions=((0.0, 0.1),),
+        wx_support_values=(0.03,),
     )
 
 
@@ -177,6 +202,27 @@ class TestMDNRuntimeSelectorSelect:
         result = selector.select_from_library(_obs(), library)
 
         assert result.behavior_probability == pytest.approx(1.0)
+
+    def test_select_from_library_can_select_cvar_skill(self):
+        model = _make_model()
+        selector = MDNRuntimeSelector(model)
+        library = SkillLibrary()
+        certificate = _make_cvar_certificate("skill_cvar", 1.0, (0.3, 0.2))
+        assert library.add_skill("skill_cvar", certificate, lambda obs: None)
+
+        with patch.object(
+            model,
+            "forward_inference",
+            return_value=(
+                torch.tensor([3.0, 2.0], dtype=torch.float32),
+                torch.tensor([0.8, 0.4], dtype=torch.float32),
+            ),
+        ):
+            result = selector.select_from_library(_obs(), library)
+
+        assert result.selected_skill_id == "skill_cvar"
+        assert result.candidate_skills[0].gate_type == "CVAR"
+        assert result.candidate_skills[0].metadata["mdn_alpha"] == certificate.mdn_alpha
 
 
 class TestSelectionResultBuildDecisionRecord:

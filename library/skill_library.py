@@ -271,6 +271,7 @@ class SkillLibrary:
         current_weight: np.ndarray,
         support_directions: Optional[np.ndarray] = None,
         support_values: Optional[np.ndarray] = None,
+        mdn_alpha: Optional[np.ndarray] = None,
     ) -> List[SkillEntry]:
         """Return skills admissible under the current MDN weight and W_x region."""
         w = np.asarray(current_weight, dtype=np.float64).reshape(-1)
@@ -278,6 +279,16 @@ class SkillLibrary:
             raise ValueError(
                 f"current_weight must be a valid simplex vector, got {current_weight}"
             )
+
+        current_mdn_alpha = None
+        if mdn_alpha is not None:
+            current_mdn_alpha = np.asarray(mdn_alpha, dtype=np.float64).reshape(-1)
+            if current_mdn_alpha.shape != w.shape:
+                raise ValueError(
+                    "mdn_alpha must have the same length as current_weight"
+                )
+            if not np.all(np.isfinite(current_mdn_alpha)) or np.any(current_mdn_alpha <= 0.0):
+                raise ValueError("mdn_alpha must contain only positive finite values")
 
         wx_feasible = True
         if support_values is not None:
@@ -305,6 +316,19 @@ class SkillLibrary:
                 sd = np.asarray(support_directions, dtype=np.float64)
                 sv = np.asarray(support_values, dtype=np.float64)
                 delta_n = np.asarray(entry.delta_n, dtype=np.float64)
+
+                if entry.gate_type == "CVAR":
+                    if current_mdn_alpha is None:
+                        raise ValueError(
+                            f"CVAR skill '{entry.skill_id}' requires current mdn_alpha for runtime admissibility."
+                        )
+                    if CVaRGate().admit(
+                        entry.delta_r,
+                        delta_n,
+                        mdn_alpha=current_mdn_alpha,
+                    ):
+                        admissible.append(entry)
+                    continue
 
                 h_wx = _compute_wx_worst_case(delta_n, sd, sv)
 

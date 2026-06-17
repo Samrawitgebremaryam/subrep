@@ -75,6 +75,44 @@ def _make_entry(
     )
 
 
+def _make_cvar_entry(
+    skill_id: str = "wx-cvar",
+    delta_r: float = 1.0,
+    delta_n: tuple = (0.3, 0.2),
+) -> SkillEntry:
+    cert = Certificate(
+        skill_id=skill_id,
+        gate_type="CVAR",
+        delta_r=delta_r,
+        delta_n=delta_n,
+        admission_margin=max(0.0, delta_r + min(delta_n)),
+        epsilon=0.0,
+        timestamp=datetime.now(timezone.utc).isoformat(),
+        seed=42,
+        gamma=0.99,
+        baseline_id="idle_v1",
+        environment="MO-LunarLander-v3",
+        episode_length=200,
+        version="0.1.0",
+        weight_region_type=MDN_WX,
+        certification_context=(0.0,) * 8,
+        mdn_alpha=(3.0, 2.0),
+        wx_support_directions=((0.0, 0.1),),
+        wx_support_values=(0.03,),
+    )
+    return SkillEntry(
+        skill_id=skill_id,
+        gate_type="CVAR",
+        certificate=cert,
+        policy=lambda obs: 0,
+        weight_region_type=MDN_WX,
+        certification_context=cert.certification_context,
+        mdn_alpha=cert.mdn_alpha,
+        wx_support_directions=cert.wx_support_directions,
+        wx_support_values=cert.wx_support_values,
+    )
+
+
 def _build_library_with_both_types() -> SkillLibrary:
     """Build a library with one FULL_SIMPLEX and one MDN_WX skill."""
     lib = SkillLibrary()
@@ -403,6 +441,52 @@ def test_pds_mdn_wx_fails_without_epsilon():
     )
     assert len(result) == 0
 
+
+def test_cvar_mdn_wx_uses_current_mdn_alpha():
+    """CVaR MDN_WX skills are admitted by replaying the CVaR gate under current alpha."""
+    lib = SkillLibrary()
+    lib._skills["wx-cvar"] = _make_cvar_entry("wx-cvar")
+
+    result = lib.query_admissible(
+        current_weight=np.array([0.6, 0.4]),
+        support_directions=np.eye(2),
+        support_values=np.array([0.8, 0.4]),
+        mdn_alpha=np.array([3.0, 2.0]),
+    )
+
+    assert [entry.skill_id for entry in result] == ["wx-cvar"]
+
+
+def test_cvar_mdn_wx_rejects_failing_current_alpha():
+    """A CVaR skill that fails under the current MDN distribution is filtered out."""
+    lib = SkillLibrary()
+    lib._skills["wx-cvar-bad"] = _make_cvar_entry(
+        "wx-cvar-bad",
+        delta_r=-1.0,
+        delta_n=(-0.3, -0.2),
+    )
+
+    result = lib.query_admissible(
+        current_weight=np.array([0.6, 0.4]),
+        support_directions=np.eye(2),
+        support_values=np.array([0.8, 0.4]),
+        mdn_alpha=np.array([3.0, 2.0]),
+    )
+
+    assert result == []
+
+
+def test_cvar_mdn_wx_requires_current_mdn_alpha():
+    lib = SkillLibrary()
+    lib._skills["wx-cvar"] = _make_cvar_entry("wx-cvar")
+
+    with pytest.raises(ValueError, match="current mdn_alpha"):
+        lib.query_admissible(
+            current_weight=np.array([0.6, 0.4]),
+            support_directions=np.eye(2),
+            support_values=np.array([0.8, 0.4]),
+        )
+
 def test_mdn_wx_without_audit_fields_raises_at_construction():
     """MDN_WX SkillEntry must require all four audit fields."""
     # All four missing — error should list every one.
@@ -483,6 +567,31 @@ def test_tie_break_selects_lexicographically_smaller_id():
         chosen = selector.select_by_mdn(np.zeros(8))
 
     assert chosen == "skill_a"
+
+
+def test_select_by_mdn_can_select_cvar_skill():
+    lib = SkillLibrary()
+    lib._skills["fs-cds"] = _make_entry(
+        skill_id="fs-cds",
+        delta_r=0.1,
+        delta_n=(0.1, 0.1),
+    )
+    lib._skills["wx-cvar"] = _make_cvar_entry(
+        "wx-cvar",
+        delta_r=1.0,
+        delta_n=(0.3, 0.2),
+    )
+
+    class _StubMDN:
+        def forward_inference(self, obs_tensor):
+            alpha = torch.tensor([3.0, 2.0], dtype=torch.float32)
+            support = torch.tensor([0.8, 0.4], dtype=torch.float32)
+            return alpha, support
+
+    selector = SkillSelector(library=lib, mdn=_StubMDN(), seed=42)
+    chosen = selector.select_by_mdn(np.zeros(8))
+
+    assert chosen == "wx-cvar"
 
 def test_add_skill_mdn_wx_succeeds():
     """add_skill with MDN_WX should verify against the W_x region and succeed."""

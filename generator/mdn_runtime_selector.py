@@ -144,6 +144,7 @@ class MDNRuntimeSelector:
             current_weight=weights,
             support_directions=support_directions,
             support_values=support_np,
+            mdn_alpha=alpha_np,
         )
         if not admissible_entries:
             raise ValueError("select_from_library() requires at least one admissible stored skill")
