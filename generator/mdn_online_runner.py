@@ -57,6 +57,8 @@ class MDNOnlineRunner:
         auxiliary_trainer: Optional[MDNAuxiliaryTrainer] = None,
         auxiliary_replay_buffer: Optional[AuxiliaryReplayBuffer] = None,
         auxiliary_replay_train_every_n_steps: Optional[int] = None,
+        auxiliary_replay_batch_size: int | None = None,
+        auxiliary_replay_seed: int | None = None,
         device: Optional[str] = None,
         certificate_store: Optional[Any] = None,
         certificate_metadata: Optional[dict[str, Any]] = None,
@@ -69,6 +71,8 @@ class MDNOnlineRunner:
             raise ValueError("save_every_n_steps must be positive")
         if auxiliary_replay_train_every_n_steps is not None and auxiliary_replay_train_every_n_steps <= 0:
             raise ValueError("auxiliary_replay_train_every_n_steps must be positive when provided")
+        if auxiliary_replay_batch_size is not None and auxiliary_replay_batch_size <= 0:
+            raise ValueError("auxiliary_replay_batch_size must be positive when provided")
 
         self.model = model
         self.certification_pipeline = certification_pipeline
@@ -76,6 +80,8 @@ class MDNOnlineRunner:
         self.auxiliary_trainer = auxiliary_trainer
         self.auxiliary_replay_buffer = auxiliary_replay_buffer
         self.auxiliary_replay_train_every_n_steps = auxiliary_replay_train_every_n_steps
+        self.auxiliary_replay_batch_size = auxiliary_replay_batch_size
+        self.auxiliary_replay_seed = auxiliary_replay_seed
         self.baseline_stats = dict(baseline_stats)
         self.checkpoint_path = checkpoint_path
         self.store_path = store_path or certification_pipeline.config.store_path
@@ -384,7 +390,13 @@ class MDNOnlineRunner:
         if self._step_count % self.auxiliary_replay_train_every_n_steps != 0:
             return None
 
-        entries = self.auxiliary_replay_buffer.sample_all()
+        if self.auxiliary_replay_batch_size is None:
+            entries = self.auxiliary_replay_buffer.sample_all()
+        else:
+            entries = self.auxiliary_replay_buffer.sample_batch(
+                self.auxiliary_replay_batch_size,
+                seed=None if self.auxiliary_replay_seed is None else self.auxiliary_replay_seed + self._step_count,
+            )
         if not entries:
             return None
         if len(entries) < 2:
@@ -421,6 +433,8 @@ class MDNOnlineRunner:
         auxiliary_trainer: Optional[MDNAuxiliaryTrainer] = None,
         auxiliary_replay_buffer: Optional[AuxiliaryReplayBuffer] = None,
         auxiliary_replay_train_every_n_steps: Optional[int] = None,
+        auxiliary_replay_batch_size: int | None = None,
+        auxiliary_replay_seed: int | None = None,
         device: Optional[str] = None,
         certificate_store: Optional[Any] = None,
         certificate_metadata: Optional[dict[str, Any]] = None,
@@ -441,6 +455,8 @@ class MDNOnlineRunner:
             auxiliary_trainer=auxiliary_trainer,
             auxiliary_replay_buffer=auxiliary_replay_buffer,
             auxiliary_replay_train_every_n_steps=auxiliary_replay_train_every_n_steps,
+            auxiliary_replay_batch_size=auxiliary_replay_batch_size,
+            auxiliary_replay_seed=auxiliary_replay_seed,
             device=device,
             certificate_store=certificate_store,
             certificate_metadata=certificate_metadata,

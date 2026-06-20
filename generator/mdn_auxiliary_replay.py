@@ -48,6 +48,23 @@ class AuxiliaryReplayBuffer:
     def sample_all(self) -> list[AuxiliaryReplayEntry]:
         return list(self._buffer)
 
+    def sample_batch(
+        self,
+        batch_size: int,
+        *,
+        seed: int | None = None,
+    ) -> list[AuxiliaryReplayEntry]:
+        if batch_size <= 0:
+            raise ValueError("batch_size must be positive")
+        entries = list(self._buffer)
+        if len(entries) <= batch_size:
+            return entries
+        import numpy as np
+
+        rng = np.random.default_rng(seed)
+        indices = rng.choice(len(entries), size=int(batch_size), replace=False)
+        return [entries[int(index)] for index in indices]
+
     def last(self) -> Optional[AuxiliaryReplayEntry]:
         if not self._buffer:
             return None

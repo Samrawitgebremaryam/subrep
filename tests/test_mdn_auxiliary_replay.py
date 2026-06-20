@@ -58,6 +58,49 @@ def test_replay_buffer_enforces_capacity():
     assert buffer.last() == second
 
 
+def test_replay_buffer_samples_bounded_batch_reproducibly():
+    buffer = AuxiliaryReplayBuffer(capacity=5)
+    entries = []
+    for index in range(5):
+        entry = AuxiliaryReplayEntry(
+            context=(float(index),) * 8,
+            selected_skill_id=f"skill_{index}",
+            selected_candidate_index=0,
+            behavior_probability=0.5,
+            actual_payoff=1.0,
+            actual_motives=(0.1, 0.2),
+            candidate_skill_ids=(f"skill_{index}",),
+            candidate_accept_labels=(1.0,),
+            candidate_delta_r=(0.1,),
+            candidate_delta_n=((0.1, 0.2),),
+            certified_candidate_indices=(0,),
+        )
+        entries.append(entry)
+        buffer.append(entry)
+
+    batch_a = buffer.sample_batch(2, seed=7)
+    batch_b = buffer.sample_batch(2, seed=7)
+
+    assert len(batch_a) == 2
+    assert batch_a == batch_b
+    assert set(batch_a).issubset(set(entries))
+
+
+def test_replay_buffer_sample_batch_returns_all_when_small():
+    buffer = AuxiliaryReplayBuffer(capacity=5)
+    entry = _entry()
+    buffer.append(entry)
+
+    assert buffer.sample_batch(4) == [entry]
+
+
+def test_replay_buffer_sample_batch_rejects_invalid_size():
+    buffer = AuxiliaryReplayBuffer(capacity=5)
+
+    with pytest.raises(ValueError, match="batch_size"):
+        buffer.sample_batch(0)
+
+
 def test_replay_entry_to_selected_auxiliary_record_preserves_probability_fields():
     record = replay_entry_to_selected_auxiliary_record(_entry(), num_skills=128)
 
