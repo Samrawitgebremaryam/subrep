@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Optional
@@ -82,6 +83,7 @@ class MDNAuxiliaryTrainerConfig:
     use_ips: bool = False
     ips_clip: float = 10.0
     use_doubly_robust: bool = False
+    dr_target_ema_tau: float = 0.05
 
 
 class MDNAuxiliaryTrainer:
@@ -94,6 +96,14 @@ class MDNAuxiliaryTrainer:
             raise ValueError("use_ips and use_doubly_robust are mutually exclusive auxiliary estimators")
         self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
         self.model.to(self.device)
+        if not (0.0 < float(self.config.dr_target_ema_tau) <= 1.0):
+            raise ValueError("dr_target_ema_tau must be in (0, 1]")
+        self.target_model: MotiveDecompositionNetwork | None = None
+        if self.config.use_doubly_robust:
+            self.target_model = copy.deepcopy(self.model).to(self.device)
+            self.target_model.eval()
+            for parameter in self.target_model.parameters():
+                parameter.requires_grad_(False)
         self.gate_loss_fn = BCEWithLogitsLoss()
         self.q_loss_fn = MSELoss()
         self.optimizer = torch.optim.AdamW(
@@ -244,7 +254,7 @@ class MDNAuxiliaryTrainer:
                 ips_weight = min(raw_weight, float(self.config.ips_clip))
 
                 if self.config.use_doubly_robust:
-                    baseline = q_hat.detach()
+                    baseline = self._estimate_dr_baseline(ctx, sid, q_hat)
                     dr_target = baseline + ips_weight * (q_tgt - baseline)
                     batch_loss, gate_loss, q_loss = self._compute_losses(
                         gate_logits,
@@ -269,6 +279,8 @@ class MDNAuxiliaryTrainer:
                 batch_loss.backward()
                 clip_grad_norm_(self.model.parameters(), self.config.gradient_clip_norm)
                 self.optimizer.step()
+                if self.config.use_doubly_robust:
+                    self._update_target_model()
 
             pred = (torch.sigmoid(gate_logits) >= 0.5).float()
             total_correct += float((pred == label).sum().item())
@@ -356,6 +368,7 @@ class MDNAuxiliaryTrainer:
                         "model_state_dict": self.model.state_dict(),
                         "optimizer_state_dict": self.optimizer.state_dict(),
                         "scheduler_state_dict": self.scheduler.state_dict(),
+                        "target_model_state_dict": None if self.target_model is None else self.target_model.state_dict(),
                         "config": self.config.__dict__,
                         "metrics": best_metrics,
                     },
@@ -422,6 +435,7 @@ class MDNAuxiliaryTrainer:
                         "model_state_dict": self.model.state_dict(),
                         "optimizer_state_dict": self.optimizer.state_dict(),
                         "scheduler_state_dict": self.scheduler.state_dict(),
+                        "target_model_state_dict": None if self.target_model is None else self.target_model.state_dict(),
                         "config": self.config.__dict__,
                         "metrics": best_metrics,
                     },
@@ -438,6 +452,28 @@ class MDNAuxiliaryTrainer:
             "best_metrics": best_metrics,
             "checkpoint_path": str(checkpoint_path),
         }
+
+    def _estimate_dr_baseline(
+        self,
+        context: torch.Tensor,
+        skill_id: torch.Tensor,
+        fallback_q_hat: torch.Tensor,
+    ) -> torch.Tensor:
+        """Return a detached DR control-variate estimate from the frozen target model."""
+        if self.target_model is None:
+            return fallback_q_hat.detach()
+        with torch.no_grad():
+            _, target_q = self.target_model.forward_auxiliary(context, skill_id)
+        return target_q.detach()
+
+    def _update_target_model(self) -> None:
+        """EMA-update the frozen target model after online DR updates."""
+        if self.target_model is None:
+            return
+        tau = float(self.config.dr_target_ema_tau)
+        with torch.no_grad():
+            for target_param, source_param in zip(self.target_model.parameters(), self.model.parameters()):
+                target_param.mul_(1.0 - tau).add_(source_param, alpha=tau)
 
 
 def build_auxiliary_record(

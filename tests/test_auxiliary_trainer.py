@@ -396,6 +396,64 @@ def test_dr_baseline_has_no_gradient():
     assert q_hat.grad is not None
 
 
+def test_dr_trainer_creates_frozen_target_baseline():
+    model = MotiveDecompositionNetwork(input_dim=8, num_skills=4, num_objectives=2)
+    trainer = MDNAuxiliaryTrainer(
+        model,
+        config=MDNAuxiliaryTrainerConfig(use_doubly_robust=True),
+        device="cpu",
+    )
+
+    assert trainer.target_model is not None
+    assert trainer.target_model is not trainer.model
+    assert all(not parameter.requires_grad for parameter in trainer.target_model.parameters())
+
+
+def test_dr_baseline_uses_target_model_estimate():
+    model = MotiveDecompositionNetwork(input_dim=8, num_skills=4, num_objectives=2)
+    trainer = MDNAuxiliaryTrainer(
+        model,
+        config=MDNAuxiliaryTrainerConfig(use_doubly_robust=True),
+        device="cpu",
+    )
+    assert trainer.target_model is not None
+
+    with torch.no_grad():
+        for parameter in trainer.target_model.parameters():
+            parameter.add_(0.5)
+    ctx = torch.tensor([(0.1,) * 8], dtype=torch.float32)
+    sid = torch.tensor([1], dtype=torch.long)
+    _, q_hat = trainer.model.forward_auxiliary(ctx, sid)
+    _, target_q = trainer.target_model.forward_auxiliary(ctx, sid)
+
+    baseline = trainer._estimate_dr_baseline(ctx, sid, q_hat)
+
+    assert torch.allclose(baseline, target_q)
+    assert not torch.allclose(baseline, q_hat)
+    assert baseline.requires_grad is False
+
+
+def test_dr_target_model_updates_by_ema_after_training_step():
+    model = MotiveDecompositionNetwork(input_dim=8, num_skills=4, num_objectives=2)
+    trainer = MDNAuxiliaryTrainer(
+        model,
+        config=MDNAuxiliaryTrainerConfig(
+            use_doubly_robust=True,
+            dr_target_ema_tau=1.0,
+            max_epochs=1,
+            batch_size=1,
+        ),
+        device="cpu",
+    )
+    assert trainer.target_model is not None
+    record = _probability_aware_record()
+
+    trainer.online_step(record)
+
+    for target_param, source_param in zip(trainer.target_model.parameters(), trainer.model.parameters()):
+        assert torch.allclose(target_param, source_param)
+
+
 def test_dr_single_record_does_not_crash():
     model = MotiveDecompositionNetwork(input_dim=8, num_skills=4, num_objectives=2)
     trainer = MDNAuxiliaryTrainer(
