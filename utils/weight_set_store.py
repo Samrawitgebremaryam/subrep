@@ -10,17 +10,28 @@ import json
 
 import numpy as np
 
-from utils.support_geometry import compute_support_values_from_vertices, make_basis_query_directions, simplex_support_values
-
-
+from utils.support_geometry import (
+    box_simplex_worst_case_score,
+    compute_support_values_from_vertices,
+    make_basis_query_directions,
+    simplex_support_values,
+    validate_box_support_values,
+)
 @dataclass
 class WeightSet:
-    """Weight set W_x for a single context, represented by observed vertices."""
+    """Weight set W_x for a single context.
+
+    Can be represented either as a finite set of observed vertices, or as
+    a box-capped simplex defined by per-objective support values (works
+    for any number of objectives M). Only one representation is used at a
+    time; box_upper_bounds takes precedence when both are supplied.
+    """
 
     vertices: list[np.ndarray] = field(default_factory=list)
+    box_upper_bounds: Optional[np.ndarray] = None
 
     def is_empty(self) -> bool:
-        return len(self.vertices) == 0
+        return len(self.vertices) == 0 and self.box_upper_bounds is None
 
     def add_vertex(self, weight_vector: np.ndarray) -> None:
         weight_vector = np.asarray(weight_vector, dtype=np.float32).reshape(-1)
@@ -30,18 +41,36 @@ class WeightSet:
             raise ValueError("weight_vector must contain only finite values")
         self.vertices.append(weight_vector.copy())
 
+    @classmethod
+    def from_box_support(cls, support_values: np.ndarray) -> "WeightSet":
+        """Build a WeightSet from MDN-predicted support values (any M >= 1)."""
+        validated = validate_box_support_values(support_values)
+        return cls(box_upper_bounds=validated.astype(np.float32))
+
     def get_support_values(self, query_directions: np.ndarray) -> np.ndarray:
+        if self.box_upper_bounds is not None:
+            return self.box_upper_bounds.astype(np.float32)
         if self.is_empty():
             return simplex_support_values(query_directions)
         vertices_array = np.stack(self.vertices, axis=0)
         return compute_support_values_from_vertices(vertices_array, query_directions)
 
     def get_vertices_array(self) -> Optional[np.ndarray]:
-        if self.is_empty():
+        if len(self.vertices) == 0:
             return None
         return np.stack(self.vertices, axis=0)
 
-
+    def get_worst_case_score(self, direction: np.ndarray) -> float:
+        """Return min_{w in W} w . direction. Works for any M >= 1, whether
+        this WeightSet is vertex-backed or box-backed."""
+        direction = np.asarray(direction, dtype=np.float64).reshape(-1)
+        if self.box_upper_bounds is not None:
+            return box_simplex_worst_case_score(self.box_upper_bounds, direction)
+        vertices = self.get_vertices_array()
+        if vertices is None:
+            return float(np.min(direction))
+        return float(np.min(np.asarray(vertices, dtype=np.float64) @ direction))
+    
 class WeightSetStore:
     """Per-context registry of learned weight sets W_x."""
 

@@ -59,13 +59,7 @@ class PDSGate(AdmissionGate):
             min_motive = compute_worst_case_motive(delta_n)
             return bool(float(delta_r) + min_motive >= -self.epsilon)
 
-        vertices = weight_set.get_vertices_array()
-        if vertices is None:
-            min_motive = compute_worst_case_motive(delta_n)
-            return bool(float(delta_r) + min_motive >= -self.epsilon)
-        delta_n_arr = np.asarray(delta_n, dtype=np.float32)
-        scores = vertices @ delta_n_arr
-        min_score = float(np.min(scores))
+        min_score = weight_set.get_worst_case_score(delta_n)
         return bool(float(delta_r) + min_score >= -self.epsilon)
     
     def get_gate_type(self) -> str:
@@ -84,11 +78,7 @@ class PDSGate(AdmissionGate):
         self.validate_inputs(delta_r, delta_n)
         if weight_set is None or weight_set.is_empty():
             return float(delta_r) + float(np.min(delta_n)) + self.epsilon
-        vertices = weight_set.get_vertices_array()
-        if vertices is None:
-            return float(delta_r) + float(np.min(delta_n)) + self.epsilon
-        delta_n_arr = np.asarray(delta_n, dtype=np.float32)
-        return float(delta_r) + float(np.min(vertices @ delta_n_arr)) + self.epsilon
+        return float(delta_r) + weight_set.get_worst_case_score(delta_n) + self.epsilon
     
     def get_epsilon(self) -> float:
         """Return the epsilon budget."""

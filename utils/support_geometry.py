@@ -50,3 +50,59 @@ def simplex_support_values(query_directions: np.ndarray) -> np.ndarray:
     if not np.all(np.isfinite(query_directions)):
         raise ValueError("query_directions must contain only finite values")
     return np.max(query_directions, axis=1).astype(np.float32)
+
+def validate_box_support_values(support_values: np.ndarray) -> np.ndarray:
+    """Validate M-objective W_x support values on the standard basis directions.
+
+    support_values[i] is the support-function value h_Wx(e_i) = max_{w in Wx} w_i,
+    i.e. an upper bound on how much weight objective i may receive inside Wx:
+
+        Wx = {w : w >= 0, sum(w) == 1, w_i <= support_values[i] for all i}
+
+    This region is well-defined (non-empty) for any M >= 1 as long as every
+    value lies in [0, 1] and the values sum to at least 1. Works for any M.
+    """
+    support_values = np.asarray(support_values, dtype=np.float64).reshape(-1)
+    if support_values.shape[0] == 0:
+        raise ValueError("support_values must be non-empty")
+    if not np.all(np.isfinite(support_values)):
+        raise ValueError("support_values must contain only finite values")
+    if not np.all((support_values >= 0.0) & (support_values <= 1.0)):
+        raise ValueError(f"support_values must satisfy 0 <= s_i <= 1, got {support_values.tolist()}")
+    if float(np.sum(support_values)) < 1.0 - 1e-6:
+        raise ValueError(
+            "support_values must satisfy sum(s_i) >= 1 (otherwise Wx is empty), "
+            f"got sum={float(np.sum(support_values)):.6f} from {support_values.tolist()}"
+        )
+    return support_values
+
+
+def box_simplex_worst_case_score(support_values: np.ndarray, direction: np.ndarray) -> float:
+    """Compute min_{w in Wx} w . direction for the box-capped simplex Wx.
+
+    Solved via greedy/water-filling: to minimize the dot product, allocate
+    as much of the unit weight budget as possible to the objectives with
+    the smallest `direction` value first, up to each objective's cap. This
+    is exact for any number of objectives M >= 1 (for M == 2 it reduces to
+    evaluating the two interval endpoints by hand, which is what the old
+    2-objective-only code did).
+    """
+    support_values = validate_box_support_values(support_values)
+    direction = np.asarray(direction, dtype=np.float64).reshape(-1)
+    if direction.shape != support_values.shape:
+        raise ValueError(
+            f"direction shape {direction.shape} must match support_values shape {support_values.shape}"
+        )
+    if not np.all(np.isfinite(direction)):
+        raise ValueError("direction must contain only finite values")
+
+    order = np.argsort(direction, kind="stable")
+    remaining = 1.0
+    total = 0.0
+    for index in order:
+        if remaining <= 1e-12:
+            break
+        take = min(float(support_values[index]), remaining)
+        total += take * float(direction[index])
+        remaining -= take
+    return float(total)

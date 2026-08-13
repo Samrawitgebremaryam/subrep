@@ -14,6 +14,7 @@ import numpy as np
 from .skill_metadata import SkillEntry, FULL_SIMPLEX, MDN_WX
 from utils.cone_utils import validate_simplex_weights
 from utils.weight_set_store import WeightSet
+from utils.support_geometry import box_simplex_worst_case_score, validate_box_support_values
 from certification.certificate_schema import Certificate
 from certification.cds_test import CDSGate
 from certification.pds_test import PDSGate
@@ -21,72 +22,40 @@ from certification.pds_test import PDSGate
 logger = logging.getLogger(__name__)
 
 def _validate_wx_geometry(support_directions: np.ndarray, support_values: np.ndarray,) -> tuple[np.ndarray, np.ndarray]:
-    """Validate W_x support geometry for M=2 standard basis"""
+    """Validate W_x support geometry on the standard basis, for any M >= 1."""
     sd = np.asarray(support_directions, dtype=np.float64)
-    sv = np.asarray(support_values, dtype=np.float64)
+    sv = validate_box_support_values(support_values)
     num_obj = len(sv)
-
-    if num_obj != 2:
-        raise ValueError(
-            f"W_x vertex reconstruction requires M=2, got M={num_obj}."
-        )
 
     expected_shape = (num_obj, num_obj)
     if sd.shape != expected_shape:
-        raise ValueError(
-            f"support_directions must have shape {expected_shape},got {sd.shape}"
-        )
+        raise ValueError(f"support_directions must have shape {expected_shape},got {sd.shape}")
 
     basis = np.eye(num_obj, dtype=np.float64)
     if not np.allclose(sd, basis, atol=1e-6):
         raise ValueError(
             f"W_x vertex reconstruction requires standard basis support directions (identity matrix), got {sd.tolist()}"
         )
-    
-    if not np.all((sv >= 0.0) & (sv <= 1.0)):
-        raise ValueError(
-            f"support_values must satisfy 0 ≤ s_i ≤ 1, got {sv.tolist()}"
-        )
-
-    if float(np.sum(sv)) < 1.0:
-        raise ValueError(
-            f"Support values must satisfy s₀ + s₁ ≥ 1, (otherwise W_x is empty), got sum={float(np.sum(sv)):.6f} from {sv.tolist()}"
-        )
-
     return sd, sv
 
 def _support_values_feasible(support_values: np.ndarray) -> bool:
-    """Check runtime feasibility of MDN-predicted support values"""
-    sv = np.asarray(support_values, dtype=np.float64)
-    if not np.all((sv >= 0.0) & (sv <= 1.0)):
-        return False
-    if float(np.sum(sv)) < 1.0:
+    """Check runtime feasibility of MDN-predicted support values (any M >= 1)."""
+    try:
+        validate_box_support_values(support_values)
+    except ValueError:
         return False
     return True
 
 def _compute_wx_worst_case(delta_n: np.ndarray, support_directions: np.ndarray, support_values: np.ndarray,) -> float:
-    """Compute h_{W_x}(-Δn) = max_{w ∈ W_x} w · (-Δn)"""
-    sd, sv = _validate_wx_geometry(support_directions, support_values)
-    neg_delta_n = -np.asarray(delta_n, dtype=np.float64)
-
-    vertices = np.array([
-        [sv[0], 1.0 - sv[0]],
-        [1.0 - sv[1], sv[1]],
-    ], dtype=np.float64)
-
-    scores = vertices @ neg_delta_n
-    return float(np.max(scores))
+    """Compute h_{W_x}(-Δn) = max_{w ∈ W_x} w · (-Δn), for any M >= 1."""
+    _, sv = _validate_wx_geometry(support_directions, support_values)
+    delta_n_arr = np.asarray(delta_n, dtype=np.float64)
+    return -box_simplex_worst_case_score(sv, delta_n_arr)
 
 def _build_wx_weight_set(support_directions: tuple[tuple[float, ...], ...], support_values: tuple[float, ...],) -> WeightSet:
-    """Reconstruct a WeightSet from W_x support geometry"""
-    _, sv = _validate_wx_geometry(
-        np.asarray(support_directions), np.asarray(support_values)
-    )
-
-    ws = WeightSet()
-    ws.add_vertex(np.array([sv[0], 1.0 - sv[0]], dtype=np.float32))
-    ws.add_vertex(np.array([1.0 - sv[1], sv[1]], dtype=np.float32))
-    return ws
+    """Reconstruct a WeightSet from W_x support geometry, for any M >= 1."""
+    _, sv = _validate_wx_geometry(np.asarray(support_directions), np.asarray(support_values))
+    return WeightSet.from_box_support(sv)
 
 class SkillLibrary:
     """ In-memory store of certified skills """

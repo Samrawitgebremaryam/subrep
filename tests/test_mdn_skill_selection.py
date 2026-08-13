@@ -486,14 +486,14 @@ def test_mdn_wx_without_audit_fields_raises_at_construction():
     for field in ["certification_context", "wx_support_directions", "wx_support_values"]:
         assert field in msg, f"Expected '{field}' in error message, got: {msg}"
 
-def test_wx_worst_case_rejects_non_2d():
-    """Vertex reconstruction should reject M != 2."""
-    with pytest.raises(ValueError, match="M=2"):
-        _compute_wx_worst_case(
-            delta_n=np.array([0.1, 0.2, 0.3]),
-            support_directions=np.eye(3),
-            support_values=np.array([0.5, 0.5, 0.5]),
-        )
+def test_wx_worst_case_generalizes_beyond_2_objectives():
+    delta_n = np.array([0.1, 0.2, 0.3])
+    support_values = np.array([0.5, 0.5, 0.5])
+    h_wx = _compute_wx_worst_case(
+        delta_n=delta_n, support_directions=np.eye(3), support_values=support_values,
+    )
+    expected = 0.5 * (-0.1) + 0.5 * (-0.2)
+    assert h_wx == pytest.approx(expected)
 
 def test_wx_worst_case_rejects_non_basis_directions():
     """Vertex reconstruction should reject non-standard-basis directions."""
@@ -600,7 +600,7 @@ def test_construction_rejects_out_of_range_support_values():
     lib = SkillLibrary()
     cert = _make_cert(skill_id="bad-sv", delta_r=1.0, delta_n=(-0.2, 0.1))
 
-    with pytest.raises(ValueError, match="0 ≤ s_i ≤ 1"):
+    with pytest.raises(ValueError, match=r"0 <= s_i <= 1"):
         lib.add_skill(
             "bad-sv", cert, lambda obs: 0,
             weight_region_type=MDN_WX,
@@ -615,7 +615,7 @@ def test_construction_rejects_empty_region_support_values():
     lib = SkillLibrary()
     cert = _make_cert(skill_id="bad-sv", delta_r=1.0, delta_n=(-0.2, 0.1))
 
-    with pytest.raises(ValueError, match="s₀ \\+ s₁ ≥ 1"):
+    with pytest.raises(ValueError, match=r"sum\(s_i\) >= 1"):
         lib.add_skill(
             "bad-sv", cert, lambda obs: 0,
             weight_region_type=MDN_WX,
