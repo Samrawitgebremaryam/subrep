@@ -50,7 +50,7 @@ class MotiveDecompositionNetwork(nn.Module):
 
         self.trunk = nn.Sequential(*trunk_layers)
         self.distribution_head = nn.Linear(hidden_dim, num_objectives)
-        self.support_head = nn.Linear(hidden_dim, num_objectives + 1)
+        self.support_head = nn.Linear(hidden_dim, num_objectives)
         self.skill_embedding = nn.Embedding(num_skills, skill_embedding_dim)
         self.auxiliary_fusion = nn.Sequential(
             nn.Linear(hidden_dim + skill_embedding_dim, hidden_dim),
@@ -59,7 +59,7 @@ class MotiveDecompositionNetwork(nn.Module):
         self.gate_head = nn.Linear(hidden_dim, 1)
         self.motive_head = nn.Linear(hidden_dim, num_objectives)
         self.softplus = nn.Softplus()
-        self.support_activation = nn.Softplus()
+    
 
         self._initialize_weights()
 
@@ -96,21 +96,40 @@ class MotiveDecompositionNetwork(nn.Module):
         return features, is_single_input
 
     def _support_values_from_raw(self, raw_support: Tensor) -> Tensor:
-        # if self.num_objectives != 2:
-        #     return self.support_activation(raw_support)
+        """Map raw support-head output to valid W_x support values.
 
-        # lower = torch.sigmoid(raw_support[..., 0])
-        # width_fraction = torch.sigmoid(raw_support[..., 1])
-        # upper = lower + width_fraction * (1.0 - lower)
-        # return torch.stack((upper, 1.0 - lower), dim=-1)
-        tight_logits = raw_support[..., : self.num_objectives]
-        openness_logit = raw_support[..., self.num_objectives]
+        Guarantees, for ANY num_objectives >= 1 (not just 2):
+        - 0 <= s_i <= 1 for every objective i
+        - sum_i s_i >= 1, so the induced box-capped-simplex region
+            W_x = {w : w >= 0, sum(w) == 1, w_i <= s_i} is always non-empty
 
-        tight_point = torch.softmax(tight_logits, dim=-1)
-        openness = torch.sigmoid(openness_logit).unsqueeze(-1)
+        Construction:
 
-        return tight_point + openness * (1.0 - tight_point)
-       
+            base    = sigmoid(raw_support)                     # (..., M), each in (0, 1)
+            deficit = relu(1 - sum(base))                       # how far short of 1 the sum is
+            headroom = 1 - base                                 # remaining room before hitting the cap of 1
+            boost   = deficit * headroom / sum(headroom)         # redistribute the deficit, capped-safe
+            s       = base + boost
+
+        Whenever sum(base) >= 1 already, s == base exactly (no redistribution
+        at all). Since base = sigmoid(raw_support) is surjective onto (0,1)^M
+        coordinate-by-coordinate, this means EVERY feasible target vector with
+        sum(s) >= 1 is exactly reachable (e.g. [0.8, 0.5, 0.1] for M=3, which
+        an earlier softmax-based parametrization could not represent, since it
+        forced every s_i above a shared floor). The boost term only kicks in
+        for the infeasible remainder of raw-output space (sum(base) < 1).
+
+        Needs exactly num_objectives raw inputs (no extra scalar), so
+        support_head's output size matches the model's original shape —
+        checkpoints trained before this generalization still load cleanly.
+        """
+        base = torch.sigmoid(raw_support)
+        deficit = torch.clamp(1.0 - base.sum(dim=-1, keepdim=True), min=0.0)
+        headroom = 1.0 - base
+        headroom_sum = headroom.sum(dim=-1, keepdim=True).clamp(min=1e-8)
+        boost = deficit * headroom / headroom_sum
+        return base + boost
+        
 
     def forward_inference(self, context: Tensor) -> tuple[Tensor, Tensor]:
         features, is_single_input = self._encode_context(context)

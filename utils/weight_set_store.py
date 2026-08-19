@@ -49,7 +49,26 @@ class WeightSet:
 
     def get_support_values(self, query_directions: np.ndarray) -> np.ndarray:
         if self.box_upper_bounds is not None:
-            return self.box_upper_bounds.astype(np.float32)
+            query_directions = np.asarray(query_directions, dtype=np.float64)
+            if query_directions.ndim != 2:
+                raise ValueError(
+                    f"query_directions must have shape (K, M), got {query_directions.shape}"
+                )
+            # h_Wx(direction) = max_{w in Wx} w . direction
+            #                 = -min_{w in Wx} w . (-direction)
+            # Correct for ANY query direction, not just the standard basis
+            # (for a standard basis row e_i this reduces to exactly
+            # box_upper_bounds[i], which is why the old shortcut of just
+            # returning box_upper_bounds happened to work for the only
+            # caller in this codebase — but was wrong for any other direction).
+            return np.array(
+                [
+                    -box_simplex_worst_case_score(self.box_upper_bounds, -direction)
+                    for direction in query_directions
+                ],
+                dtype=np.float32,
+            )
+        
         if self.is_empty():
             return simplex_support_values(query_directions)
         vertices_array = np.stack(self.vertices, axis=0)

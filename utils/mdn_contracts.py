@@ -20,7 +20,7 @@ class CandidateSkillRecord:
 
     skill_id: str
     delta_r: float
-    delta_n: tuple[float, float]
+    delta_n: tuple[float, ...]
     is_certified: bool
     gate_type: str
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -46,8 +46,8 @@ class CandidateSkillRecord:
         object.__setattr__(self, "delta_r", delta_r)
 
         delta_n = tuple(float(v) for v in self.delta_n)
-        if len(delta_n) != 2:
-            raise ValueError(f"delta_n must have length 2, got {len(delta_n)}")
+        if len(delta_n) == 0:
+            raise ValueError("delta_n must be non-empty")
         if not all(isfinite(v) for v in delta_n):
             raise ValueError(f"delta_n must contain only finite values, got {delta_n}")
         object.__setattr__(self, "delta_n", delta_n)
@@ -84,7 +84,7 @@ class MDNDecisionRecord:
     selected_score: float | None = None
     behavior_probability: float | None = None
     actual_payoff: float | None = None
-    actual_motives: tuple[float, float] | None = None
+    actual_motives: tuple[float, ...] | None = None
     utility: float | None = None
     schema_version: str = "1.0"
 

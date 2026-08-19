@@ -35,15 +35,29 @@ def test_candidate_skill_record_rejects_invalid_gate_type():
         )
 
 
-def test_candidate_skill_record_rejects_invalid_delta_n_length():
+def test_candidate_skill_record_rejects_empty_delta_n():
     with pytest.raises(ValueError, match="delta_n"):
         CandidateSkillRecord(
             skill_id="skill_a",
             delta_r=0.5,
-            delta_n=(0.2, -0.1, 0.4),
+            delta_n=(),
             is_certified=True,
             gate_type="CDS",
         )
+
+
+def test_candidate_skill_record_accepts_any_positive_delta_n_length():
+    """delta_n length is tied to the environment's objective count, not
+    fixed at 2 — 3, 4, 5+ objectives must all be accepted."""
+    for num_objectives in (1, 2, 3, 5):
+        record = CandidateSkillRecord(
+            skill_id="skill_a",
+            delta_r=0.5,
+            delta_n=tuple(0.1 * i for i in range(1, num_objectives + 1)),
+            is_certified=True,
+            gate_type="CDS",
+        )
+        assert len(record.delta_n) == num_objectives
 
 
 def test_alpha_to_mean_weights_normalizes_single_vector():
