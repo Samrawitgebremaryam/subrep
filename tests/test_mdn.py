@@ -81,10 +81,13 @@ def test_mdn_two_objective_support_values_are_feasible_for_batched_contexts():
 
 
 def test_mdn_non_two_objective_support_values_are_feasible_for_single_context():
+    """3+ objective support values must define a valid, non-empty W_x region."""
     torch.manual_seed(0)
     model = MotiveDecompositionNetwork(num_objectives=3)
     context = torch.randn(8)
+
     _, support_values = model.forward_inference(context)
+
     assert support_values.shape == (3,)
     assert torch.all(support_values >= 0)
     assert torch.all(support_values <= 1)
@@ -92,14 +95,31 @@ def test_mdn_non_two_objective_support_values_are_feasible_for_single_context():
 
 
 def test_mdn_non_two_objective_support_values_are_feasible_for_batched_contexts():
+    """Same feasibility guarantee, batched, for a higher objective count."""
     torch.manual_seed(0)
     model = MotiveDecompositionNetwork(num_objectives=5)
     context = torch.randn(6, 8)
+
     _, support_values = model.forward_inference(context)
+
     assert support_values.shape == (6, 5)
     assert torch.all(support_values >= 0)
     assert torch.all(support_values <= 1)
     assert torch.all(torch.sum(support_values, dim=-1) >= 1.0)
+
+
+def test_mdn_support_values_can_represent_arbitrary_valid_target():
+    """Regression test: [0.8, 0.5, 0.1] is a valid support vector
+    (each in [0,1], sum=1.4 >= 1) that the earlier softmax+openness
+    parametrization could NOT represent (it forced every s_i above a
+    shared floor). The sigmoid+deficit formula must reach it exactly."""
+    torch.manual_seed(0)
+    model = MotiveDecompositionNetwork(num_objectives=3)
+    target = torch.tensor([0.8, 0.5, 0.1])
+    raw = torch.logit(target)
+    with torch.no_grad():
+        s = model._support_values_from_raw(raw)
+    assert torch.allclose(s, target, atol=1e-5)
 
 
 def test_mdn_outputs_are_finite():

@@ -89,6 +89,18 @@ class CertificateStore:
         results: list[Certificate] = []
 
         for cert in self.load_all():
+            # Enforce objective-count consistency up front for every gate
+            # type. Without this, a CDS certificate would be silently
+            # admitted for a weight vector of the wrong dimension (since
+            # the CDS branch below never touches `w`), while a PDS
+            # certificate would only fail later inside np.dot with an
+            # opaque shape-mismatch error.
+            if len(w) != len(cert.delta_n):
+                raise ValueError(
+                    f"weights length {len(w)} does not match certificate "
+                    f"{cert.skill_id!r}'s delta_n length {len(cert.delta_n)} "
+                    "(objective-count mismatch)"
+                )
             if cert.gate_type == "CDS":
                 # CDS is globally admissible under the simplex assumption.
                 results.append(cert)

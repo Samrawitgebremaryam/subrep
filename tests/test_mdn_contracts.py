@@ -48,7 +48,7 @@ def test_candidate_skill_record_rejects_empty_delta_n():
 
 def test_candidate_skill_record_accepts_any_positive_delta_n_length():
     """delta_n length is tied to the environment's objective count, not
-    fixed at 2 — 3, 4, 5+ objectives must all be accepted."""
+    fixed at 2 -- 3, 4, 5+ objectives must all be accepted."""
     for num_objectives in (1, 2, 3, 5):
         record = CandidateSkillRecord(
             skill_id="skill_a",

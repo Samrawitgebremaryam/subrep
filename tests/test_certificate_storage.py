@@ -82,8 +82,14 @@ def test_certificate_cds_nonzero_epsilon_fails():
 
 
 def test_certificate_wrong_delta_n_length_fails():
-    with pytest.raises(ValueError):
-        _sample_certificate(delta_n=(0.1, 0.2, 0.3))  # type: ignore[arg-type]
+    """delta_n is now generalized to any objective count, so a length-3
+    vector is valid on its own -- only emptiness/non-finiteness fail."""
+    _sample_certificate(delta_n=(0.1, 0.2, 0.3))  # must NOT raise
+
+
+def test_certificate_rejects_empty_delta_n():
+    with pytest.raises(ValueError, match="delta_n"):
+        _sample_certificate(delta_n=())  # type: ignore[arg-type]
 
 
 def test_certificate_negative_admission_margin_fails():
@@ -266,6 +272,53 @@ def test_query_by_weights_raises_even_when_store_empty():
     store = CertificateStore()
     with pytest.raises(ValueError):
         store.query_by_weights([0.4, 0.4])
+
+
+def test_certificate_store_add_and_query_n3_objectives():
+    """Full store + query path at M=3 objectives, not just M=2."""
+    store = CertificateStore()
+    cds_n3 = _sample_certificate(
+        skill_id="cds_n3", gate_type="CDS", epsilon=0.0,
+        delta_r=0.5, delta_n=(0.2, -0.1, 0.3), admission_margin=0.4,
+    )
+    pds_n3 = _sample_certificate(
+        skill_id="pds_n3", gate_type="PDS", epsilon=0.2,
+        delta_r=0.1, delta_n=(-0.05, -0.2, 0.05), admission_margin=0.05,
+    )
+    assert store.add(cds_n3)
+    assert store.add(pds_n3)
+    assert store.count() == 2
+    assert store.get_certificate("cds_n3").delta_n == (0.2, -0.1, 0.3)
+
+    by_gate = store.query_by_gate_type("CDS")
+    assert [c.skill_id for c in by_gate] == ["cds_n3"]
+
+    # A matching-dimension query weight vector: CDS is globally admissible,
+    # PDS is checked via delta_r + w^T delta_n >= -epsilon.
+    results = store.query_by_weights([0.34, 0.33, 0.33])
+    result_ids = {c.skill_id for c in results}
+    assert "cds_n3" in result_ids  # CDS always admitted under a valid simplex
+    # pds_n3 score = 0.1 + (0.34*-0.05 + 0.33*-0.2 + 0.33*0.05) ~= 0.1 - 0.0655 = 0.0345 >= -0.2
+    assert "pds_n3" in result_ids
+
+
+def test_query_by_weights_rejects_dimension_mismatch_with_stored_certificates():
+    """A valid-shaped simplex vector whose dimension does not match a
+    stored certificate's delta_n must be rejected explicitly -- not
+    silently accepted (CDS) or left to fail deep inside np.dot (PDS)."""
+    store = CertificateStore()
+    store.add(_sample_certificate(skill_id="cds_2d", gate_type="CDS", epsilon=0.0))
+    # A perfectly valid 3-length simplex vector, but the stored certificate
+    # is 2-dimensional -- this must raise, not silently pass CDS through.
+    with pytest.raises(ValueError, match="objective-count mismatch"):
+        store.query_by_weights([0.34, 0.33, 0.33])
+
+    store_pds = CertificateStore()
+    store_pds.add(
+        _sample_certificate(skill_id="pds_2d", gate_type="PDS", epsilon=0.1)
+    )
+    with pytest.raises(ValueError, match="objective-count mismatch"):
+        store_pds.query_by_weights([0.34, 0.33, 0.33])
 
 
 def test_save_and_load_file_roundtrip_replaces_store():

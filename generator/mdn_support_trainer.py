@@ -73,6 +73,7 @@ class MDNSupportTrainer:
                 "model_state_dict": self.model.state_dict(),
                 "optimizer_state_dict": self.optimizer.state_dict(),
                 "config": self.config.__dict__,
+                "support_param_version": MotiveDecompositionNetwork.SUPPORT_PARAM_VERSION,
             },
             checkpoint_path,
         )

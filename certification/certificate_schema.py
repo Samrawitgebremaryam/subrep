@@ -73,8 +73,8 @@ class Certificate:
                 f"got {self.weight_region_type!r}"
             )
 
-        #Motive vector length is derived from the environment's number of
-        # objectives — validated for shape/finiteness here, not pinned to 2.
+        # Motive vector length is derived from the environment's number of
+        # objectives -- validated for shape/finiteness here, not pinned to 2.
         dn = tuple(float(v) for v in self.delta_n)
         if len(dn) == 0:
             raise ValueError("delta_n must be non-empty")
@@ -203,10 +203,23 @@ def validate_mdn_certificate(cert: Certificate) -> None:
         non_negative=True,
     )
 
-    if len(values) != len(directions):
+    # All MDN-specific fields must agree on the same objective count M.
+    # certification_context is the raw environment observation and is
+    # intentionally excluded -- its length is the observation dimension,
+    # not the objective count, and has no relationship to M.
+    num_objectives = len(cert.delta_n)
+    if len(alpha) != num_objectives:
         raise ValueError(
-            "wx_support_values must have the same number of items as "
-            "wx_support_directions rows"
+            f"mdn_alpha length {len(alpha)} must match delta_n length {num_objectives}"
+        )
+    if len(values) != num_objectives:
+        raise ValueError(
+            f"wx_support_values length {len(values)} must match delta_n length {num_objectives}"
+        )
+    if len(directions) != num_objectives or any(len(row) != num_objectives for row in directions):
+        raise ValueError(
+            f"wx_support_directions must be a {num_objectives}x{num_objectives} matrix "
+            f"to match delta_n length {num_objectives}, got {len(directions)} rows"
         )
 
     object.__setattr__(cert, "certification_context", context)

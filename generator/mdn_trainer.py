@@ -258,6 +258,11 @@ class MDNTrainer:
                 "config": self.config.__dict__,
                 "running_baseline": self.running_baseline,
                 "context_baselines": self._context_baselines,
+                # Records which _support_values_from_raw formula produced
+                # this checkpoint's weights. Tensor shapes alone do not
+                # guarantee numeric compatibility across formula changes --
+                # see utils/mdn_checkpoint_loader.py's version check.
+                "support_param_version": MotiveDecompositionNetwork.SUPPORT_PARAM_VERSION,
             },
             checkpoint_path,
         )

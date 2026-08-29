@@ -426,6 +426,7 @@ class MDNAuxiliaryTrainer:
                         "scheduler_state_dict": self.scheduler.state_dict(),
                         "config": self.config.__dict__,
                         "metrics": best_metrics,
+                        "support_param_version": MotiveDecompositionNetwork.SUPPORT_PARAM_VERSION,
                     },
                     checkpoint_path,
                 )
@@ -502,6 +503,7 @@ class MDNAuxiliaryTrainer:
                         "scheduler_state_dict": self.scheduler.state_dict(),
                         "config": self.config.__dict__,
                         "metrics": best_metrics,
+                        "support_param_version": MotiveDecompositionNetwork.SUPPORT_PARAM_VERSION,
                     },
                     checkpoint_path,
                 )

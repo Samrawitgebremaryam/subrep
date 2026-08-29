@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import json
 
@@ -17,6 +17,8 @@ from utils.support_geometry import (
     simplex_support_values,
     validate_box_support_values,
 )
+
+
 @dataclass
 class WeightSet:
     """Weight set W_x for a single context.
@@ -56,11 +58,7 @@ class WeightSet:
                 )
             # h_Wx(direction) = max_{w in Wx} w . direction
             #                 = -min_{w in Wx} w . (-direction)
-            # Correct for ANY query direction, not just the standard basis
-            # (for a standard basis row e_i this reduces to exactly
-            # box_upper_bounds[i], which is why the old shortcut of just
-            # returning box_upper_bounds happened to work for the only
-            # caller in this codebase — but was wrong for any other direction).
+            # Correct for ANY query direction, not just the standard basis.
             return np.array(
                 [
                     -box_simplex_worst_case_score(self.box_upper_bounds, -direction)
@@ -68,7 +66,6 @@ class WeightSet:
                 ],
                 dtype=np.float32,
             )
-        
         if self.is_empty():
             return simplex_support_values(query_directions)
         vertices_array = np.stack(self.vertices, axis=0)
@@ -80,8 +77,7 @@ class WeightSet:
         return np.stack(self.vertices, axis=0)
 
     def get_worst_case_score(self, direction: np.ndarray) -> float:
-        """Return min_{w in W} w . direction. Works for any M >= 1, whether
-        this WeightSet is vertex-backed or box-backed."""
+        """Return min_{w in W} w . direction. Works for any M >= 1."""
         direction = np.asarray(direction, dtype=np.float64).reshape(-1)
         if self.box_upper_bounds is not None:
             return box_simplex_worst_case_score(self.box_upper_bounds, direction)
@@ -89,7 +85,8 @@ class WeightSet:
         if vertices is None:
             return float(np.min(direction))
         return float(np.min(np.asarray(vertices, dtype=np.float64) @ direction))
-    
+
+
 class WeightSetStore:
     """Per-context registry of learned weight sets W_x."""
 
@@ -139,28 +136,62 @@ class WeightSetStore:
         return sum(len(weight_set.vertices) for weight_set in self._store.values())
 
     def save(self, path: str | Path) -> None:
-        """Persist the current `W_x` store to JSON."""
+        """Persist the current `W_x` store to JSON.
+
+        Each context's WeightSet is tagged with its representation
+        ("vertices" or "box") so box-capped-simplex sets (produced by
+        WeightSet.from_box_support) round-trip correctly instead of
+        silently being dropped -- a plain vertex list has no way to
+        express box_upper_bounds.
+        """
         file_path = Path(path)
         file_path.parent.mkdir(parents=True, exist_ok=True)
-        data = {
-            "num_objectives": self.num_objectives,
-            "contexts": {
-                ",".join(map(str, key)): [vertex.tolist() for vertex in weight_set.vertices]
-                for key, weight_set in self._store.items()
-            },
-        }
+        contexts_data: dict[str, dict[str, Any]] = {}
+        for key, weight_set in self._store.items():
+            key_str = ",".join(map(str, key))
+            if weight_set.box_upper_bounds is not None:
+                contexts_data[key_str] = {
+                    "representation": "box",
+                    "box_upper_bounds": weight_set.box_upper_bounds.tolist(),
+                }
+            else:
+                contexts_data[key_str] = {
+                    "representation": "vertices",
+                    "vertices": [vertex.tolist() for vertex in weight_set.vertices],
+                }
+        data = {"num_objectives": self.num_objectives, "contexts": contexts_data}
         file_path.write_text(json.dumps(data), encoding="utf-8")
 
     @classmethod
     def load(cls, path: str | Path) -> "WeightSetStore":
-        """Restore a `WeightSetStore` from JSON persistence."""
+        """Restore a `WeightSetStore` from JSON persistence.
+
+        Accepts both the current tagged format and the older plain
+        vertex-list format (for files saved before box-backed WeightSets
+        existed) -- old files never contained box_upper_bounds, so
+        reading them as plain vertex lists is exact, not a guess.
+        """
         file_path = Path(path)
         data = json.loads(file_path.read_text(encoding="utf-8"))
         store = cls(num_objectives=int(data["num_objectives"]))
-        for key_str, vertices_list in data["contexts"].items():
+        for key_str, entry in data["contexts"].items():
             key = tuple(float(value) for value in key_str.split(",") if value != "")
-            weight_set = WeightSet()
-            for vertex in vertices_list:
-                weight_set.add_vertex(np.asarray(vertex, dtype=np.float32))
+            if isinstance(entry, list):
+                # Pre-existing format: a bare list of vertices.
+                weight_set = WeightSet()
+                for vertex in entry:
+                    weight_set.add_vertex(np.asarray(vertex, dtype=np.float32))
+            elif entry.get("representation") == "box":
+                weight_set = WeightSet.from_box_support(
+                    np.asarray(entry["box_upper_bounds"], dtype=np.float32)
+                )
+            elif entry.get("representation") == "vertices":
+                weight_set = WeightSet()
+                for vertex in entry["vertices"]:
+                    weight_set.add_vertex(np.asarray(vertex, dtype=np.float32))
+            else:
+                raise ValueError(
+                    f"Unknown WeightSet representation in {path}: {entry.get('representation')!r}"
+                )
             store._store[key] = weight_set
         return store

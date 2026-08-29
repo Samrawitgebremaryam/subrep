@@ -62,6 +62,7 @@ def score_candidate(candidate: CandidateSkillRecord, weights: np.ndarray) -> flo
 
     return float(candidate.delta_r + float(np.dot(weights, np.asarray(candidate.delta_n, dtype=np.float64))))
 
+
 def select_best_candidate(candidates: tuple[CandidateSkillRecord, ...] | list[CandidateSkillRecord], weights: np.ndarray) -> tuple[str, float]:
     """Select the highest-scoring certified candidate for the provided weights."""
     certified_candidates = [candidate for candidate in candidates if candidate.is_certified]

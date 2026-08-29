@@ -50,7 +50,7 @@ class MotiveDecompositionNetwork(nn.Module):
 
         self.trunk = nn.Sequential(*trunk_layers)
         self.distribution_head = nn.Linear(hidden_dim, num_objectives)
-        self.support_head = nn.Linear(hidden_dim, num_objectives)
+        self.support_head = nn.Linear(hidden_dim, num_objectives)  # see _support_values_from_raw
         self.skill_embedding = nn.Embedding(num_skills, skill_embedding_dim)
         self.auxiliary_fusion = nn.Sequential(
             nn.Linear(hidden_dim + skill_embedding_dim, hidden_dim),
@@ -59,7 +59,6 @@ class MotiveDecompositionNetwork(nn.Module):
         self.gate_head = nn.Linear(hidden_dim, 1)
         self.motive_head = nn.Linear(hidden_dim, num_objectives)
         self.softplus = nn.Softplus()
-    
 
         self._initialize_weights()
 
@@ -95,12 +94,21 @@ class MotiveDecompositionNetwork(nn.Module):
         features = self.trunk(context)
         return features, is_single_input
 
+    # Bump this whenever _support_values_from_raw's semantics change in a
+    # way that alters outputs for the same raw_support tensor. Checkpoints
+    # remain tensor-SHAPE compatible across versions, but are NOT
+    # numerically/behavior compatible unless the version matches -- see
+    # utils/mdn_checkpoint_loader.py, which warns loudly on a
+    # mismatch/missing value instead of silently reinterpreting old
+    # weights under new semantics.
+    SUPPORT_PARAM_VERSION = "sigmoid_deficit_v1"
+
     def _support_values_from_raw(self, raw_support: Tensor) -> Tensor:
         """Map raw support-head output to valid W_x support values.
 
         Guarantees, for ANY num_objectives >= 1 (not just 2):
-        - 0 <= s_i <= 1 for every objective i
-        - sum_i s_i >= 1, so the induced box-capped-simplex region
+          - 0 <= s_i <= 1 for every objective i
+          - sum_i s_i >= 1, so the induced box-capped-simplex region
             W_x = {w : w >= 0, sum(w) == 1, w_i <= s_i} is always non-empty
 
         Construction:
@@ -111,17 +119,13 @@ class MotiveDecompositionNetwork(nn.Module):
             boost   = deficit * headroom / sum(headroom)         # redistribute the deficit, capped-safe
             s       = base + boost
 
-        Whenever sum(base) >= 1 already, s == base exactly (no redistribution
-        at all). Since base = sigmoid(raw_support) is surjective onto (0,1)^M
-        coordinate-by-coordinate, this means EVERY feasible target vector with
-        sum(s) >= 1 is exactly reachable (e.g. [0.8, 0.5, 0.1] for M=3, which
-        an earlier softmax-based parametrization could not represent, since it
-        forced every s_i above a shared floor). The boost term only kicks in
-        for the infeasible remainder of raw-output space (sum(base) < 1).
-
-        Needs exactly num_objectives raw inputs (no extra scalar), so
-        support_head's output size matches the model's original shape —
-        checkpoints trained before this generalization still load cleanly.
+        Whenever sum(base) >= 1 already, s == base exactly (no
+        redistribution). Since base = sigmoid(raw_support) is surjective
+        onto (0, 1)^M coordinate-by-coordinate, EVERY feasible target
+        vector with sum(s) >= 1 is exactly reachable this way (e.g.
+        [0.8, 0.5, 0.1] for M=3). Needs exactly num_objectives raw
+        inputs, matching the model's original (pre-generalization) tensor
+        shapes -- but not its numeric behavior; see SUPPORT_PARAM_VERSION.
         """
         base = torch.sigmoid(raw_support)
         deficit = torch.clamp(1.0 - base.sum(dim=-1, keepdim=True), min=0.0)
@@ -129,7 +133,6 @@ class MotiveDecompositionNetwork(nn.Module):
         headroom_sum = headroom.sum(dim=-1, keepdim=True).clamp(min=1e-8)
         boost = deficit * headroom / headroom_sum
         return base + boost
-        
 
     def forward_inference(self, context: Tensor) -> tuple[Tensor, Tensor]:
         features, is_single_input = self._encode_context(context)

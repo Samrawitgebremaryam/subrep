@@ -487,6 +487,7 @@ def test_mdn_wx_without_audit_fields_raises_at_construction():
         assert field in msg, f"Expected '{field}' in error message, got: {msg}"
 
 def test_wx_worst_case_generalizes_beyond_2_objectives():
+    """Vertex reconstruction now works for any M >= 1, not just M=2."""
     delta_n = np.array([0.1, 0.2, 0.3])
     support_values = np.array([0.5, 0.5, 0.5])
     h_wx = _compute_wx_worst_case(

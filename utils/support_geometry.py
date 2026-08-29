@@ -51,16 +51,17 @@ def simplex_support_values(query_directions: np.ndarray) -> np.ndarray:
         raise ValueError("query_directions must contain only finite values")
     return np.max(query_directions, axis=1).astype(np.float32)
 
+
 def validate_box_support_values(support_values: np.ndarray) -> np.ndarray:
     """Validate M-objective W_x support values on the standard basis directions.
 
-    support_values[i] is the support-function value h_Wx(e_i) = max_{w in Wx} w_i,
-    i.e. an upper bound on how much weight objective i may receive inside Wx:
+    support_values[i] is h_Wx(e_i) = max_{w in Wx} w_i, i.e. an upper bound
+    on how much weight objective i may receive inside Wx:
 
         Wx = {w : w >= 0, sum(w) == 1, w_i <= support_values[i] for all i}
 
-    This region is well-defined (non-empty) for any M >= 1 as long as every
-    value lies in [0, 1] and the values sum to at least 1. Works for any M.
+    Well-defined (non-empty) for any M >= 1 as long as every value lies in
+    [0, 1] and the values sum to at least 1. Works for any M.
     """
     support_values = np.asarray(support_values, dtype=np.float64).reshape(-1)
     if support_values.shape[0] == 0:
@@ -80,12 +81,9 @@ def validate_box_support_values(support_values: np.ndarray) -> np.ndarray:
 def box_simplex_worst_case_score(support_values: np.ndarray, direction: np.ndarray) -> float:
     """Compute min_{w in Wx} w . direction for the box-capped simplex Wx.
 
-    Solved via greedy/water-filling: to minimize the dot product, allocate
-    as much of the unit weight budget as possible to the objectives with
-    the smallest `direction` value first, up to each objective's cap. This
-    is exact for any number of objectives M >= 1 (for M == 2 it reduces to
-    evaluating the two interval endpoints by hand, which is what the old
-    2-objective-only code did).
+    Solved via greedy/water-filling: allocate as much of the unit weight
+    budget as possible to the objectives with the smallest direction value
+    first, up to each objective's cap. Exact for any M >= 1.
     """
     support_values = validate_box_support_values(support_values)
     direction = np.asarray(direction, dtype=np.float64).reshape(-1)
