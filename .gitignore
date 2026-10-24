@@ -42,3 +42,6 @@ data/raw_mixed/
 
 data/omega_requests/
 data/omega_selections/
+
+data/run_unintegrated.txt
+data/run_integrated.txt
