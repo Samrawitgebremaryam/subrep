@@ -32,6 +32,7 @@ for idx, obs in enumerate(eval_observations, 1):
         dr = delta_r_by_id.get(result.selected_skill_id)
         print(f"  Obs {idx}: Selected skill '{result.selected_skill_id}' "
               f"(delta_r={dr}, regret={best_dr - dr:.2f}, time={elapsed:.1f}s)")
+        print(f"          Reason: {result.reasoning}")
     except Exception as e:
         print(f"  Obs {idx}: Selection failed - {e}")
 

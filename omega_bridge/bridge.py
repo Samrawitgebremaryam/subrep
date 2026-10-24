@@ -1,37 +1,80 @@
-"""SubRep's side of the file-based bridge to Omega's SubRepChannel plugin."""
+"""File-based bridge to Omega. Builds the prompt from the EXACT same inputs
+the MDN selector receives: the observation and the full candidate records."""
+
+from __future__ import annotations
 
 import json
 import time
-import uuid
 from pathlib import Path
 
 import numpy as np
 
-REQUESTS_DIR = Path.home() / "subrep" / "data" / "omega_requests"
-RESULTS_DIR = Path.home() / "subrep" / "data" / "omega_selections"
+BASE_DIR = Path.home() / "subrep" / "data"
+REQUESTS_DIR = BASE_DIR / "omega_requests"
+RESULTS_DIR = BASE_DIR / "omega_selections"
+LAST_REASON = ""
+
+CANDIDATE_FIELDS = (
+    "skill_id", "delta_r", "delta_n", "is_certified", "gate_type",
+    "admission_margin", "epsilon", "baseline_id", "metadata",
+)
 
 
-def _format_prompt(candidates) -> str:
-    lines = ["SKILL SELECTION REQUEST", "Certified candidate skills:"]
+def _clean(value):
+    """Turn numpy numbers/tuples into plain JSON-friendly Python values."""
+    if isinstance(value, (np.floating, np.integer)):
+        return value.item()
+    if isinstance(value, (tuple, list)):
+        return [_clean(v) for v in value]
+    if isinstance(value, dict):
+        return {k: _clean(v) for k, v in value.items()}
+    return value
+
+
+def build_prompt(observation, candidates) -> str:
+    obs = [float(v) for v in np.asarray(observation, dtype=np.float32).reshape(-1)]
+    ids = [c.skill_id for c in candidates]
+
+    lines = ["SKILL SELECTION REQUEST", f"Observation: {json.dumps(obs)}",
+             "Certified candidate skills (all fields):"]
     for c in candidates:
-        lines.append(f"- id={c.skill_id} delta_r={c.delta_r:.3f} delta_n={list(c.delta_n)} gate={c.gate_type}")
-    ids = ", ".join(c.skill_id for c in candidates)
-    lines.append(f"Reply with EXACTLY: select-skill <skill_id>, where <skill_id> is one of: {ids}")
+        record = {f: _clean(getattr(c, f, None)) for f in CANDIDATE_FIELDS}
+        lines.append("- " + json.dumps(record, default=str))
+
+    
+    lines.append(
+        'Reply with EXACTLY one command: select-skill <skill_id> "<reason>", '
+        "where <skill_id> is one of: " + ", ".join(ids) + ". "
+        "The reason is your own explanation of why you chose it, in one or two plain sentences."
+    )
     return "\n".join(lines)
 
-def request_selection(observation, candidates, timeout: float = 300.0) -> str:
+
+def request_selection(observation, candidates, timeout: float = 300) -> str:
     REQUESTS_DIR.mkdir(parents=True, exist_ok=True)
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+
     answer_path = RESULTS_DIR / "answer.json"
     if answer_path.exists():
-        answer_path.unlink()  # clear any stale answer before asking again
+        answer_path.unlink()  # clear any stale answer
 
-    (REQUESTS_DIR / "request.json").write_text(json.dumps({"prompt_text": _format_prompt(candidates)}))
+    prompt = build_prompt(observation, candidates)
 
-    elapsed = 0.0
+    # write outside the watched folder first, then move in, so Omega never
+    # reads a half-written file
+    tmp = BASE_DIR / "request.json.tmp"
+    tmp.write_text(json.dumps({"prompt_text": prompt}))
+    tmp.replace(REQUESTS_DIR / "request.json")
+
+    deadline = time.time() + timeout
     while not answer_path.exists():
-        time.sleep(0.5)
-        elapsed += 0.5
-        if elapsed > timeout:
+        if time.time() > deadline:
             raise TimeoutError("No response from Omega")
-    return json.loads(answer_path.read_text())["selected_skill_id"]
+        time.sleep(1)
+
+    time.sleep(0.2)  # let the write finish
+    global LAST_REASON
+    data = json.loads(answer_path.read_text())
+    LAST_REASON = data.get("reason", "")
+    return data["selected_skill_id"]
+    

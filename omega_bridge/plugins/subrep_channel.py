@@ -1,6 +1,6 @@
 import pathlib
-import json
 import channels
+import json, traceback
 
 REQUESTS_DIR = pathlib.Path.home() / "subrep" / "data" / "omega_requests"
 RESULTS_DIR = pathlib.Path.home() / "subrep" / "data" / "omega_selections"
@@ -25,10 +25,25 @@ class SubRepChannel(channels.CommChannel):
     def send(self, message: str) -> None:
         print("SubRep channel received reply:", message)
 
-def select_skill(skill_id: str) -> str:
-    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    (RESULTS_DIR / "answer.json").write_text(json.dumps({"selected_skill_id": skill_id}))
-    return f"Recorded {skill_id}"
+def select_skill(skill_id, reason=""):
+    skill_id = str(skill_id).strip().strip('"').strip("'")
+    reason = str(reason).strip().strip('"').strip("'")
+
+    # If the model merged both arguments into one string, split them
+    if " " in skill_id:
+        first, _, rest = skill_id.partition(" ")
+        skill_id = first.strip('"').strip("'")
+        if not reason:
+            reason = rest.strip().strip('"').strip("'")
+
+    try:
+        RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+        tmp = RESULTS_DIR / "answer.json.tmp"
+        tmp.write_text(json.dumps({"selected_skill_id": skill_id, "reason": reason}))
+        tmp.replace(RESULTS_DIR / "answer.json")
+        return f"Selected {skill_id}"
+    except Exception as e:
+        return f"select-skill failed: {e}"
 
 def loadOmegaPlugin():
     channels.registerCommChannel("SubRep", SubRepChannel())

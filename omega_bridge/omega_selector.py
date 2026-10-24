@@ -1,31 +1,3 @@
-# """Drop-in alternative to MDNRuntimeSelector — routes the decision through
-# the actual running Omega process via the file-based bridge."""
-
-# from __future__ import annotations
-
-# import numpy as np
-
-# from omega_bridge.bridge import request_selection
-# from library.omega_types import OmegaSelectionResult
-
-
-# class OmegaSelector:
-#     def select(self, observation, candidate_skills) -> OmegaSelectionResult:
-#         certified = tuple(c for c in candidate_skills if c.is_certified)
-#         if not certified:
-#             raise ValueError("select() requires at least one certified candidate skill")
-
-#         obs = np.asarray(observation, dtype=np.float32).reshape(-1)
-#         selected_id = request_selection(obs, certified)
-
-#         return OmegaSelectionResult(
-#             selected_skill_id=selected_id,
-#             selected_score=None,
-#             reasoning="(reasoning not yet captured — see open item below)",
-#             candidate_skills=certified,
-#             context=tuple(float(v) for v in obs),
-#             raw_response="",
-#         )
 """Drop-in alternative to MDNRuntimeSelector: routes the decision through
 the running Omega process via the file-based bridge."""
 
@@ -39,6 +11,7 @@ import numpy as np
 from omega_bridge.bridge import request_selection
 from library.omega_types import OmegaSelectionResult
 from utils.mdn_contracts import CandidateSkillRecord
+from omega_bridge import bridge
 
 LIBRARY_PATH = Path.home() / "subrep" / "data" / "library.json"
 
@@ -74,7 +47,7 @@ class OmegaSelector:
         return OmegaSelectionResult(
             selected_skill_id=selected_id,
             selected_score=None,
-            reasoning="(reasoning not captured)",
+            reasoning=bridge.LAST_REASON or "(no reason given)",
             candidate_skills=certified,
             context=tuple(float(v) for v in obs),
             raw_response="",
